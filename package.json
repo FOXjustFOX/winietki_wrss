@@ -1,8 +1,0 @@
-{
-  "dependencies": {
-    "jszip": "^3.10.1"
-  },
-  "devDependencies": {
-    "@types/jszip": "^3.4.0"
-  }
-}
