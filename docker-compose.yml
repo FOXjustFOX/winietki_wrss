@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  web:
+    build:
+      context: ./winietki
+      dockerfile: Dockerfile
+    ports:
+      - "8088:80"
+    restart: always

@@ -25,7 +25,7 @@ body {
 .upload-container {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    /* justify-content: space-between; */
     flex-grow: 1;
 }
 
@@ -40,7 +40,8 @@ body {
     display: grid;
     grid-template-columns: minmax(600px, 1fr) minmax(400px, 1fr);
     gap: 2rem;
-    align-items: start;
+    align-items: stretch;
+    min-height: 100%;
 }
 
 .header {
@@ -91,7 +92,7 @@ body {
 
 .step-card p {
     color: var(--text-color);
-    margin-bottom: 1.5rem;
+    margin: 0 0 1.5rem 0;
     text-align: left;
 }
 
@@ -99,26 +100,68 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.5rem;
+    gap: 1rem;
     color: var(--primary-color);
     background: transparent;
     border: 2px dashed var(--border-color);
     border-radius: 0.5rem;
-    padding: 1rem;
+    padding: 2rem;
     width: 100%;
+    aspect-ratio: 1;
     cursor: pointer;
     transition: all 0.2s;
     box-sizing: border-box;
+    position: relative;
+}
+
+.upload-button::before {
+    content: "";
+    display: block;
+    width: 24px;
+    height: 24px;
+    background-image: url("/material-symbols_upload-rounded.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.upload-button span:not(:only-child)::before {
+    display: none;
+}
+
+/* Hide the icon when the span contains text other than "Dodaj" */
+.upload-button
+    span:not(:empty):not(:contains("Dodaj"))
+    + .upload-button::before {
+    display: none;
+}
+
+/* Alternative approach using a class */
+.upload-button.has-file::before {
+    display: none;
 }
 
 .upload-button span {
     color: var(--primary-color);
     font-size: 1rem;
+    text-align: center;
+    word-break: break-word;
+    max-width: 100%;
 }
 
 .upload-button:hover {
     border-color: var(--primary-color);
     background: rgba(88, 66, 255, 0.05);
+}
+
+.upload-button input[type="file"] {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    opacity: 0;
+    cursor: pointer;
 }
 
 input {
@@ -140,11 +183,16 @@ input {
     box-shadow: var(--card-shadow);
     position: sticky;
     top: 2rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
 }
 
 .preview-section h2 {
     text-align: left;
     margin-top: 0;
+    padding: 0;
     margin-bottom: 1rem;
 }
 
@@ -153,7 +201,15 @@ input {
     background: var(--background-color);
     border-radius: 0.5rem;
     overflow: hidden;
+    flex-grow: 1;
     min-height: 400px;
+}
+
+.pdf-preview-img {
+    width: 100%;
+    height: auto;
+    display: block;
+    user-select: none;
 }
 
 .settings-grid {
@@ -162,7 +218,6 @@ input {
     gap: 1rem;
     /* margin-top: 1.5rem; */
     /* grid-auto-rows: 1fr; */
-
 }
 
 .setting-item {
@@ -217,28 +272,6 @@ input {
 .setting-item select:hover,
 .setting-item input:hover {
     border-color: var(--primary-color);
-}
-
-.action-buttons {
-    display: flex;
-    gap: 1rem;
-    margin-top: 2rem;
-    justify-content: flex-start;
-}
-
-.primary-button {
-    background: var(--primary-color);
-    color: white;
-    border: none;
-    border-radius: 0.5rem;
-    padding: 0.75rem 2rem;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-
-.primary-button:hover {
-    background: #4835e6;
 }
 
 .secondary-button {
@@ -307,12 +340,13 @@ input[type="file"] {
     pointer-events: none;
     border: 1px dashed red;
     border-radius: 0.5rem;
-    padding: 0.5rem;
     background-color: rgba(255, 255, 255, 0.5);
+    padding: 0.5rem;
 }
 
 .name-preview.dragging {
     pointer-events: auto;
+    cursor: grabbing;
 }
 
 @media (max-width: 1200px) {
@@ -355,4 +389,43 @@ input[type="file"] {
 
 .upload-header {
     margin-bottom: 1.5rem;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 1rem;
+    margin-top: auto;
+    justify-content: flex-start;
+}
+
+.primary-button {
+    background: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.75rem 2rem;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.primary-button:hover {
+    background: #4835e6;
+}
+
+.primary-button:disabled {
+    background: #cccccc;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.setting-item .upload-button {
+    aspect-ratio: auto;
+    padding: 0.75rem 1rem;
+    flex-direction: row;
+}
+
+.setting-item .upload-button::before {
+    width: 24px;
+    height: 24px;
 }

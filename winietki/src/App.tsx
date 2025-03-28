@@ -51,7 +51,7 @@ function App() {
     const [pdfFontSize, setPdfFontSize] = useState<number>(12);
 
     // Preview refs
-    const previewRef = useRef<HTMLDivElement>(null);
+    const previewRef = useRef<HTMLImageElement>(null);
 
     // Add new state for output format
     const [outputFormat, setOutputFormat] = useState<"single" | "multiple">(
@@ -204,10 +204,9 @@ function App() {
     const handleMouseDown = (e: React.MouseEvent) => {
         if (previewRef.current) {
             const rect = previewRef.current.getBoundingClientRect();
-            setNamePosition({
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top,
-            });
+            const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+            const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+            setNamePosition({ x, y });
             setIsDragging(true);
         }
     };
@@ -215,10 +214,9 @@ function App() {
     const handleMouseMove = (e: React.MouseEvent) => {
         if (isDragging && previewRef.current) {
             const rect = previewRef.current.getBoundingClientRect();
-            setNamePosition({
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top,
-            });
+            const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+            const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+            setNamePosition({ x, y });
         }
     };
 
@@ -238,7 +236,7 @@ function App() {
                     if (!pdfTemplate) return;
                     const arrayBuffer = await pdfTemplate.arrayBuffer();
                     const pdfDoc = await PDFDocument.load(arrayBuffer);
-                    const page = await pdfDoc.getPage(1);
+                    const page = pdfDoc.getPage(0);
                     const { width: pdfWidth } = page.getSize();
 
                     // Get preview width
@@ -345,6 +343,8 @@ function App() {
             const previewWidth = previewRef.current?.clientWidth ?? 500;
             const previewHeight = previewRef.current?.clientHeight ?? 700;
 
+            console.log("pw: ", previewWidth, "ph: ", previewHeight);
+
             const mergedDoc = await PDFDocument.create();
             mergedDoc.registerFontkit(fontkit);
 
@@ -373,9 +373,11 @@ function App() {
                 font = await mergedDoc.embedFont(fontBytes, { subset: true });
             }
 
-            const scaledX = (namePosition.x / previewWidth) * pageWidth;
+            const scaledX = (namePosition.x / previewWidth) * pageWidth + 5;
+            // + 5 for the padding
             const scaledY =
-                pageHeight - (namePosition.y / previewHeight) * pageHeight;
+                pageHeight - (namePosition.y / previewHeight) * pageHeight - 17;
+            // dont know why 17 but it works
 
             let fullName = [
                 csvData[0].title,
@@ -584,9 +586,13 @@ function App() {
 
                         <div>
                             <label
-                                className="upload-button"
+                                className={`upload-button ${
+                                    pdfTemplate ? "has-file" : ""
+                                }`}
                                 htmlFor="pdfUpload">
-                                <span>Dodaj</span>
+                                <span>
+                                    {pdfTemplate ? pdfTemplate.name : "Dodaj"}
+                                </span>
                                 <input
                                     id="pdfUpload"
                                     type="file"
@@ -594,10 +600,8 @@ function App() {
                                     onChange={handlePdfUpload}
                                     disabled={isGenerating}
                                 />
-                                {pdfTemplate && (
-                                    <div className="step-check">✓</div>
-                                )}
                             </label>
+                            {pdfTemplate && <div className="step-check">✓</div>}
                             <div className="format-info">
                                 Możliwe format: PDF
                             </div>
@@ -614,9 +618,15 @@ function App() {
                         </div>
                         <div>
                             <label
-                                className="upload-button"
+                                className={`upload-button ${
+                                    csvData.length > 0 ? "has-file" : ""
+                                }`}
                                 htmlFor="csvUpload">
-                                <span>Dodaj</span>
+                                <span>
+                                    {csvData.length > 0
+                                        ? `Załadowano ${csvData.length} wierszy`
+                                        : "Dodaj"}
+                                </span>
                                 <input
                                     id="csvUpload"
                                     type="file"
@@ -641,9 +651,13 @@ function App() {
                             <div className="setting-item">
                                 <label>Czcionka</label>
                                 <label
-                                    className="upload-button"
+                                    className={`upload-button ${
+                                        fontFile ? "has-file" : ""
+                                    }`}
                                     htmlFor="fontUpload">
-                                    <span>Dodaj</span>
+                                    <span>
+                                        {fontFile ? fontFile.name : "Dodaj"}
+                                    </span>
                                     <input
                                         id="fontUpload"
                                         type="file"
@@ -714,12 +728,12 @@ function App() {
                         <h2>Podgląd i pozycjonowanie</h2>
                         <div
                             className="pdf-preview-container"
-                            ref={previewRef}
                             onMouseDown={handleMouseDown}
                             onMouseMove={handleMouseMove}
                             onMouseUp={handleMouseUp}
                             onMouseLeave={handleMouseUp}>
                             <img
+                                ref={previewRef}
                                 src={pdfPreviewUrl}
                                 className="pdf-preview-img"
                                 alt="PDF Preview"
@@ -750,7 +764,6 @@ function App() {
                                 </div>
                             )}
                         </div>
-
                         <div className="action-buttons">
                             <button
                                 className="primary-button"
