@@ -5,6 +5,7 @@ import "./App.css";
 import { PDFDocument, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import * as pdfjs from "pdfjs-dist";
+import JSZip from "jszip";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
     "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -17,7 +18,6 @@ interface Person {
     title?: string;
 }
 
-// CSV row interface for type safety
 interface CSVRow {
     [key: string]: string | undefined;
     firstName?: string;
@@ -52,6 +52,11 @@ function App() {
 
     // Preview refs
     const previewRef = useRef<HTMLDivElement>(null);
+
+    // Add new state for output format
+    const [outputFormat, setOutputFormat] = useState<"single" | "multiple">(
+        "single"
+    );
 
     // Handle PDF template upload
     const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -233,7 +238,7 @@ function App() {
                     if (!pdfTemplate) return;
                     const arrayBuffer = await pdfTemplate.arrayBuffer();
                     const pdfDoc = await PDFDocument.load(arrayBuffer);
-                    const page = pdfDoc.getPage(0);
+                    const page = await pdfDoc.getPage(1);
                     const { width: pdfWidth } = page.getSize();
 
                     // Get preview width
@@ -257,8 +262,10 @@ function App() {
     const handleFontScale = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newSizePt = parseInt(e.target.value);
         setPdfFontSize(newSizePt);
-        // Font size in preview should be scaled according to the preview size
-        setFontScale(Math.round(newSizePt * previewScale));
+
+        // Scale the preview font size based on the ratio between preview and PDF dimensions
+        const scaleFactor = previewScale || 1;
+        setFontScale(Math.round(newSizePt * scaleFactor));
     };
 
     // Font size
@@ -266,7 +273,7 @@ function App() {
         setTextColor(e.target.value);
     };
 
-    // Calculate appropriate font size based on PDF dimensions vs preview dimensions
+    // Improve the useEffect that calculates font scale factors
     useEffect(() => {
         if (pdfTemplate && previewRef.current) {
             const calculateFontScale = async () => {
@@ -280,37 +287,44 @@ function App() {
                     // Get preview dimensions
                     const previewWidth = previewRef.current?.clientWidth || 500;
 
-                    // Calculate initial font scale based on PDF dimensions
-                    // Only set these values if they haven't been manually adjusted
-                    if (!fontScale || fontScale === 12) {
-                        const initialScale = 12 * (previewWidth / pdfWidth);
-                        setFontScale(Math.round(initialScale));
-                        setPdfFontSize(12); // Initial PDF font size in points
-                    }
+                    // Calculate scale factor for font sizing
+                    const scaleFactor = previewWidth / pdfWidth;
+                    setPreviewScale(scaleFactor);
 
-                    console.log(
-                        "Preview width:",
-                        previewWidth,
-                        "PDF width:",
-                        pdfWidth
-                    );
-                    console.log("Preview font size (pixels):", fontScale);
-                    console.log("PDF font size (points):", pdfFontSize);
+                    // Update font scale based on new scale factor
+                    setPdfFontSize((prevSize) => {
+                        setFontScale(Math.round(prevSize * scaleFactor));
+                        return prevSize;
+                    });
                 } catch (error) {
                     console.error("Error calculating font scale:", error);
-                    // Only set default values if they haven't been manually set
-                    if (!fontScale || fontScale === 12) {
-                        setFontScale(12);
-                        setPdfFontSize(12);
-                    }
                 }
             };
 
             calculateFontScale();
-        }
-    }, [pdfTemplate, pdfPreviewUrl, fontScale, pdfFontSize]);
 
-    // Generate PDFs
+            // Add resize listener to update font scale when window/preview dimensions change
+            const handleResize = () => {
+                calculateFontScale();
+            };
+
+            window.addEventListener("resize", handleResize);
+
+            // Clean up
+            return () => {
+                window.removeEventListener("resize", handleResize);
+            };
+        }
+    }, [pdfTemplate, pdfPreviewUrl, pdfFontSize]);
+
+    // Add handler for output format change
+    const handleOutputFormatChange = (
+        e: React.ChangeEvent<HTMLSelectElement>
+    ) => {
+        setOutputFormat(e.target.value as "single" | "multiple");
+    };
+
+    // Update the generatePDFs function to handle both formats
     const generatePDFs = async () => {
         if (!pdfTemplate || csvData.length === 0) {
             alert("Please upload both a PDF template and CSV file");
@@ -359,66 +373,191 @@ function App() {
                 font = await mergedDoc.embedFont(fontBytes, { subset: true });
             }
 
-            for (let i = 0; i < csvData.length; i++) {
-                const person = csvData[i];
-                const page = await mergedDoc.copyPages(templateDoc, [0]);
-                mergedDoc.addPage(page[0]);
+            const scaledX = (namePosition.x / previewWidth) * pageWidth;
+            const scaledY =
+                pageHeight - (namePosition.y / previewHeight) * pageHeight;
 
-                const fullName = [
-                    person.title,
-                    person.firstName,
-                    person.lastName,
-                ]
-                    .filter(Boolean)
-                    .join(" ");
+            let fullName = [
+                csvData[0].title,
+                csvData[0].firstName,
+                csvData[0].lastName,
+            ]
+                .filter(Boolean)
+                .join(" ");
 
-                // Calculate scaled position from preview to PDF coordinates
-                const scaledX = (namePosition.x / previewWidth) * pageWidth;
-                const scaledY =
-                    pageHeight - (namePosition.y / previewHeight) * pageHeight;
+            // Calculate text width using the actual PDF font size
+            const textWidth = font.widthOfTextAtSize(fullName, pdfFontSize);
 
-                // Calculate text width using the actual PDF font size
-                const textWidth = font.widthOfTextAtSize(fullName, pdfFontSize);
+            // Place the text according to alignment
+            const setXoriginal = scaledX + textWidth / 2;
+            console.log("scaled x,y: ", setXoriginal, scaledY);
 
-                // Place the text according to alignment
-                let setX;
-                switch (textPlacing[0]) {
-                    case "left":
-                        setX = scaledX;
-                        break;
-                    case "center":
-                        setX = scaledX - textWidth / 2;
-                        break;
-                    default:
-                        setX = scaledX - textWidth / 2;
+            if (outputFormat === "single") {
+                // Generate single merged PDF
+                for (let i = 0; i < csvData.length; i++) {
+                    const person = csvData[i];
+                    const page = await mergedDoc.copyPages(templateDoc, [0]);
+                    mergedDoc.addPage(page[0]);
+
+                    fullName = [person.title, person.firstName, person.lastName]
+                        .filter(Boolean)
+                        .join(" ");
+
+                    const currentTextWidth = font.widthOfTextAtSize(
+                        fullName,
+                        pdfFontSize
+                    );
+
+                    // Calculate scaled position from preview to PDF coordinates
+                    let setX;
+                    switch (textPlacing[0]) {
+                        case "left":
+                            setX = setXoriginal - textWidth / 2;
+                            break;
+                        case "center":
+                            setX = setXoriginal - currentTextWidth / 2;
+                            break;
+                        default:
+                            setX = setXoriginal - currentTextWidth / 2;
+                    }
+
+                    // Draw text with the actual PDF font size
+                    page[0].drawText(fullName, {
+                        x: setX,
+                        y: scaledY,
+                        size: pdfFontSize,
+                        font: font,
+                        color: rgb(
+                            parseInt(textColor.slice(1, 3), 16) / 255,
+                            parseInt(textColor.slice(3, 5), 16) / 255,
+                            parseInt(textColor.slice(5, 7), 16) / 255
+                        ),
+                    });
+
+                    setProgress(Math.round(((i + 1) / csvData.length) * 100));
                 }
 
-                // Draw text with the actual PDF font size
-                page[0].drawText(fullName, {
-                    x: setX,
-                    y: scaledY,
-                    size: pdfFontSize,
-                    font: font,
-                    color: rgb(
-                        parseInt(textColor.slice(1, 3), 16) / 255,
-                        parseInt(textColor.slice(3, 5), 16) / 255,
-                        parseInt(textColor.slice(5, 7), 16) / 255
-                    ),
-                });
+                const pdfBytes = await mergedDoc.save();
+                const blob = new Blob([pdfBytes], { type: "application/pdf" });
+                const url = URL.createObjectURL(blob);
 
-                setProgress(Math.round(((i + 1) / csvData.length) * 100));
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "winietki.pdf";
+                link.click();
+
+                URL.revokeObjectURL(url);
+            } else {
+                // Generate multiple PDFs in a zip file
+                const zip = new JSZip();
+
+                for (let i = 0; i < csvData.length; i++) {
+                    const person = csvData[i];
+                    const singleDoc = await PDFDocument.create();
+                    singleDoc.registerFontkit(fontkit);
+
+                    // Embed the font in the single document
+                    let singleFont;
+                    if (fontFile) {
+                        try {
+                            const fontBytes = await fontFile.arrayBuffer();
+                            singleFont = await singleDoc.embedFont(fontBytes, {
+                                subset: true,
+                            });
+                        } catch (error) {
+                            console.error(
+                                "Error embedding custom font:",
+                                error
+                            );
+                            const fontResponse = await fetch(
+                                "https://pdf-lib.js.org/assets/ubuntu/Ubuntu-R.ttf"
+                            );
+                            const fontBytes = await fontResponse.arrayBuffer();
+                            singleFont = await singleDoc.embedFont(fontBytes, {
+                                subset: true,
+                            });
+                        }
+                    } else {
+                        const fontResponse = await fetch(
+                            "https://pdf-lib.js.org/assets/ubuntu/Ubuntu-R.ttf"
+                        );
+                        const fontBytes = await fontResponse.arrayBuffer();
+                        singleFont = await singleDoc.embedFont(fontBytes, {
+                            subset: true,
+                        });
+                    }
+
+                    // Copy template page
+                    const [page] = await singleDoc.copyPages(templateDoc, [0]);
+                    singleDoc.addPage(page);
+
+                    const fullName = [
+                        person.title,
+                        person.firstName,
+                        person.lastName,
+                    ]
+                        .filter(Boolean)
+                        .join(" ");
+
+                    // Calculate text width for this specific name
+                    const currentTextWidth = singleFont.widthOfTextAtSize(
+                        fullName,
+                        pdfFontSize
+                    );
+
+                    // Calculate scaled position from preview to PDF coordinates
+                    let setX;
+                    switch (textPlacing[0]) {
+                        case "left":
+                            setX = setXoriginal - textWidth / 2;
+                            break;
+                        case "center":
+                            setX = setXoriginal - currentTextWidth / 2;
+                            break;
+                        default:
+                            setX = setXoriginal - currentTextWidth / 2;
+                    }
+
+                    // Draw text with the actual PDF font size
+                    page.drawText(fullName, {
+                        x: setX,
+                        y: scaledY,
+                        size: pdfFontSize,
+                        font: singleFont, // Use the font embedded in this document
+                        color: rgb(
+                            parseInt(textColor.slice(1, 3), 16) / 255,
+                            parseInt(textColor.slice(3, 5), 16) / 255,
+                            parseInt(textColor.slice(5, 7), 16) / 255
+                        ),
+                    });
+
+                    // Save the single PDF
+                    const pdfBytes = await singleDoc.save();
+
+                    // Create filename without special characters
+                    const fileName =
+                        `${person.firstName}_${person.lastName}.pdf`.replace(
+                            /\s+/g,
+                            "_"
+                        );
+
+                    // Add to zip
+                    zip.file(fileName, pdfBytes);
+
+                    setProgress(Math.round(((i + 1) / csvData.length) * 100));
+                }
+
+                // Generate and download zip file
+                const zipBlob = await zip.generateAsync({ type: "blob" });
+                const url = URL.createObjectURL(zipBlob);
+
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = "winietki.zip";
+                link.click();
+
+                URL.revokeObjectURL(url);
             }
-
-            const pdfBytes = await mergedDoc.save();
-            const blob = new Blob([pdfBytes], { type: "application/pdf" });
-            const url = URL.createObjectURL(blob);
-
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = "winietki.pdf";
-            link.click();
-
-            URL.revokeObjectURL(url);
         } catch (error) {
             console.error("Error generating PDFs:", error);
             alert("Error generating PDFs. Check console for details.");
@@ -465,26 +604,34 @@ function App() {
                         </div>
                     </div>
 
-                    <div className="step-card">
-                        <h2>Krok 2:</h2>
-                        <p>
-                            Prześlij plik z wartościami, które chcesz
-                            wygenerować
-                        </p>
-                        <label className="upload-button" htmlFor="csvUpload">
-                            <span>Dodaj</span>
-                            <input
-                                id="csvUpload"
-                                type="file"
-                                accept=".csv"
-                                onChange={handleCsvUpload}
-                                disabled={isGenerating}
-                            />
-                        </label>
-                        <div className="format-info">Możliwy format: CSV</div>
-                        {csvData.length > 0 && (
-                            <div className="step-check">✓</div>
-                        )}
+                    <div className="step-card upload-container">
+                        <div>
+                            <h2>Krok 2:</h2>
+                            <p>
+                                Prześlij plik z wartościami, które chcesz
+                                wygenerować
+                            </p>
+                        </div>
+                        <div>
+                            <label
+                                className="upload-button"
+                                htmlFor="csvUpload">
+                                <span>Dodaj</span>
+                                <input
+                                    id="csvUpload"
+                                    type="file"
+                                    accept=".csv"
+                                    onChange={handleCsvUpload}
+                                    disabled={isGenerating}
+                                />
+                            </label>
+                            <div className="format-info">
+                                Możliwy format: CSV
+                            </div>
+                            {csvData.length > 0 && (
+                                <div className="step-check">✓</div>
+                            )}
+                        </div>
                     </div>
 
                     <div className="step-card">
@@ -546,9 +693,16 @@ function App() {
                             </div>
                             <div className="setting-item">
                                 <label>Czy złączyć w 1 plik:</label>
-                                <select>
-                                    <option value="tak">Tak</option>
-                                    <option value="nie">Nie</option>
+                                <select
+                                    value={outputFormat}
+                                    onChange={handleOutputFormatChange}
+                                    disabled={isGenerating}>
+                                    <option value="single">
+                                        Jeden plik PDF
+                                    </option>
+                                    <option value="multiple">
+                                        Osobne pliki PDF (ZIP)
+                                    </option>
                                 </select>
                             </div>
                         </div>
