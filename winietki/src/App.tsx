@@ -605,7 +605,7 @@ function App() {
                             </label>
                             {pdfTemplate && <div className="step-check">✓</div>}
                             <div className="format-info">
-                                Możliwe format: PDF
+                                Możliwy format: PDF
                             </div>
                         </div>
                     </div>
@@ -670,7 +670,7 @@ function App() {
                                 </label>
                             </div>
                             <div className="setting-item">
-                                <label>Rozmiar tekstu (pt)</label>
+                                <label>Rozmiar tekstu</label>
                                 <input
                                     type="number"
                                     min="6"
