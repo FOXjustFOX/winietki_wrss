@@ -22,15 +22,55 @@ interface Person {
 
 interface CSVRow {
     [key: string]: string | undefined;
-    firstName?: string;
-    first_name?: string;
-    Imię?: string;
-    lastName?: string;
-    last_name?: string;
-    Nazwisko?: string;
-    title?: string;
-    Tytuł?: string;
 }
+
+// Helper functions for CSV column matching
+const firstNameVariants = [
+    "firstName",
+    "first_name",
+    "Imię",
+    "imię",
+    "imie",
+    "name",
+    "Name",
+    "first",
+    "First",
+    "given_name",
+];
+const lastNameVariants = [
+    "lastName",
+    "last_name",
+    "Nazwisko",
+    "nazwisko",
+    "surname",
+    "Surname",
+    "family_name",
+    "last",
+    "Last",
+];
+const titleVariants = [
+    "title",
+    "Tytuł",
+    "tytuł",
+    "tytul",
+    "prefix",
+    "Prefix",
+    "honorific",
+    "degree",
+];
+
+// Function to find which column matches a specific field
+const findMatchingColumn = (
+    headers: string[],
+    variants: string[]
+): string | null => {
+    for (const header of headers) {
+        if (variants.includes(header.trim())) {
+            return header;
+        }
+    }
+    return null;
+};
 
 function App() {
     // File states
@@ -105,43 +145,97 @@ function App() {
                 skipEmptyLines: true,
                 complete: (results) => {
                     console.log("Raw CSV data:", results.data);
+
+                    // Get headers
+                    const headers = results.meta.fields || [];
+                    console.log("CSV headers:", headers);
+
+                    // Find matching columns for each field
+                    const firstNameCol = findMatchingColumn(
+                        headers,
+                        firstNameVariants
+                    );
+                    const lastNameCol = findMatchingColumn(
+                        headers,
+                        lastNameVariants
+                    );
+                    const titleCol = findMatchingColumn(headers, titleVariants);
+
+                    // Check if we need to use default positions
+                    const useDefaultPositions = !firstNameCol && !lastNameCol;
+                    console.log(
+                        "Using default positions:",
+                        useDefaultPositions
+                    );
+
                     const persons: Person[] = (results.data as CSVRow[])
                         .filter((row) => {
+                            // For default positions
+                            if (useDefaultPositions) {
+                                // Get first three columns values, regardless of their names
+                                const columns = Object.values(row);
+                                return (
+                                    columns.length > 0 &&
+                                    typeof columns[0] === "string" &&
+                                    columns[0].trim() !== ""
+                                );
+                            }
+
+                            // For named columns
                             const hasName =
-                                (
-                                    row.firstName ||
-                                    row.first_name ||
-                                    row.Imię ||
-                                    ""
-                                ).trim() !== "" ||
-                                (
-                                    row.lastName ||
-                                    row.last_name ||
-                                    row.Nazwisko ||
-                                    ""
-                                ).trim() !== "";
-                            console.log("Row:", row, "Has name:", hasName);
+                                (firstNameCol &&
+                                    typeof row[firstNameCol] === "string" &&
+                                    row[firstNameCol]!.trim() !== "") ||
+                                (lastNameCol &&
+                                    typeof row[lastNameCol] === "string" &&
+                                    row[lastNameCol]!.trim() !== "");
                             return hasName;
                         })
                         .map((row) => {
-                            const person = {
-                                firstName: (
-                                    row.firstName ||
-                                    row.first_name ||
-                                    row.Imię ||
-                                    ""
-                                ).trim(),
-                                lastName: (
-                                    row.lastName ||
-                                    row.last_name ||
-                                    row.Nazwisko ||
-                                    ""
-                                ).trim(),
-                                title: (row.title || row.Tytuł || "").trim(),
+                            if (useDefaultPositions) {
+                                // Get the first three columns as firstName, lastName, title
+                                const columns = Object.values(row);
+                                return {
+                                    firstName: (typeof columns[0] === "string"
+                                        ? columns[0]
+                                        : ""
+                                    ).trim(),
+                                    lastName: (columns.length > 1 &&
+                                    typeof columns[1] === "string"
+                                        ? columns[1]
+                                        : ""
+                                    ).trim(),
+                                    title: (columns.length > 2 &&
+                                    typeof columns[2] === "string"
+                                        ? columns[2]
+                                        : ""
+                                    ).trim(),
+                                };
+                            }
+
+                            // For named columns
+                            return {
+                                firstName:
+                                    firstNameCol &&
+                                    typeof row[firstNameCol] === "string"
+                                        ? row[firstNameCol]!.trim()
+                                        : "",
+                                lastName:
+                                    lastNameCol &&
+                                    typeof row[lastNameCol] === "string"
+                                        ? row[lastNameCol]!.trim()
+                                        : "",
+                                title: titleCol
+                                    ? (row[titleCol] || "").trim()
+                                    : "",
                             };
-                            console.log("Processed person:", person);
-                            return person;
-                        });
+                        })
+                        .filter(
+                            (person) =>
+                                person.firstName !== "" ||
+                                person.lastName !== ""
+                        );
+
                     console.log("Final persons array:", persons);
                     setCsvData(persons);
                 },
@@ -166,8 +260,8 @@ function App() {
 
             // Load the font for preview
             const reader = new FileReader();
-            reader.onload = (event) => {
-                if (event.target?.result) {
+            reader.onload = (event: ProgressEvent<FileReader>) => {
+                if (event.target && event.target.result) {
                     // Create and load the font
                     const fontFace = new FontFace(
                         fontFamilyName,
