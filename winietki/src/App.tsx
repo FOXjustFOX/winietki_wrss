@@ -7,7 +7,29 @@ import fontkit from "@pdf-lib/fontkit";
 import * as pdfjs from "pdfjs-dist";
 import JSZip from "jszip";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.0.375/pdf.worker.min.mjs`;
+// Configure PDF.js worker with fallback for offline use
+
+// still in the making
+
+const setPdfWorker = () => {
+    try {
+        // Fall back to CDN if local worker fails
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.0.375/pdf.worker.min.mjs`;
+    } catch {
+        console.warn(
+            "Could not load remote PDF.js worker, trying local fallback..."
+        );
+        // Try to use local worker first (needs to be in public directory)
+        pdfjs.GlobalWorkerOptions.workerSrc = `/assets/pdf.worker.min.mjs`;
+
+        // Alternative:  can include a version check to ensure compatibility
+        // const pdfjsVersion = pdfjs.version;              
+        // pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.${pdfjsVersion}.min.js`;
+    }
+};
+
+// Initialize the worker
+setPdfWorker();
 
 interface Person {
     firstName: string;
@@ -448,18 +470,17 @@ function App() {
                     });
                 } catch (error) {
                     console.error("Error embedding custom font:", error);
-                    const fontResponse = await fetch(
-                        "https://pdf-lib.js.org/assets/ubuntu/Ubuntu-R.ttf"
-                    );
+                    // Use local default font instead of fetching from external URL
+                    const fontResponse = await fetch("/fonts/default-font.ttf");
                     const fontBytes = await fontResponse.arrayBuffer();
                     font = await mergedDoc.embedFont(fontBytes, {
                         subset: true,
                     });
                 }
             } else {
-                const fontResponse = await fetch(
-                    "https://pdf-lib.js.org/assets/ubuntu/Ubuntu-R.ttf"
-                );
+                // Use local default font
+                const fontResponse = await fetch("/fonts/default-font.ttf");
+                console.log("Font response: ", fontResponse);
                 const fontBytes = await fontResponse.arrayBuffer();
                 font = await mergedDoc.embedFont(fontBytes, { subset: true });
             }
@@ -562,8 +583,9 @@ function App() {
                                 "Error embedding custom font:",
                                 error
                             );
+                            // Use local default font here too
                             const fontResponse = await fetch(
-                                "https://pdf-lib.js.org/assets/ubuntu/Ubuntu-R.ttf"
+                                "/fonts/default-font.ttf"
                             );
                             const fontBytes = await fontResponse.arrayBuffer();
                             singleFont = await singleDoc.embedFont(fontBytes, {
@@ -571,8 +593,9 @@ function App() {
                             });
                         }
                     } else {
+                        // Use local default font
                         const fontResponse = await fetch(
-                            "https://pdf-lib.js.org/assets/ubuntu/Ubuntu-R.ttf"
+                            "/fonts/default-font.ttf"
                         );
                         const fontBytes = await fontResponse.arrayBuffer();
                         singleFont = await singleDoc.embedFont(fontBytes, {
