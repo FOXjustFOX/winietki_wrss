@@ -850,7 +850,7 @@ function App() {
                                     <input
                                         id="fontUpload"
                                         type="file"
-                                        accept=".ttf,.otf"
+                                        accept=".ttf"
                                         onChange={handleFontUpload}
                                         disabled={isGenerating}
                                     />
