@@ -349,6 +349,90 @@ input[type="file"] {
     cursor: grabbing;
 }
 
+.help-icon {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background-color: #ddd;
+    color: #ff0000;
+    border: #ff0000 solid 1px;
+    font-size: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-left: 8px;
+    position: relative;
+}
+
+.help-icon:hover {
+    background-color: #ccc;
+}
+
+.help-tooltip {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    width: 300px;
+    background-color: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    font-size: 12px;
+    text-align: left;
+}
+
+.help-tooltip h4 {
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+.help-tooltip ul {
+    padding-left: 16px;
+    margin: 8px 0;
+}
+
+.help-tooltip p {
+    margin: 6px 0;
+}
+
+.csv-example-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 11px;
+}
+
+.csv-example-table th {
+    background-color: #f0f0f0;
+    border: 1px solid #ddd;
+    padding: 4px 6px;
+    text-align: center;
+    font-weight: bold;
+}
+
+.csv-example-table td {
+    border: 1px solid #ddd;
+    padding: 3px 6px;
+    text-align: left;
+}
+
+.csv-example-table caption {
+    margin-bottom: 5px;
+    font-style: italic;
+    font-size: 10px;
+    text-align: center;
+}
+
+.format-info {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
 @media (max-width: 1200px) {
     .main-content {
         grid-template-columns: 1fr;

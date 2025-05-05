@@ -23,7 +23,7 @@ const setPdfWorker = () => {
         pdfjs.GlobalWorkerOptions.workerSrc = `/assets/pdf.worker.min.mjs`;
 
         // Alternative:  can include a version check to ensure compatibility
-        // const pdfjsVersion = pdfjs.version;              
+        // const pdfjsVersion = pdfjs.version;
         // pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.${pdfjsVersion}.min.js`;
     }
 };
@@ -116,6 +116,9 @@ function App() {
     const [outputFormat, setOutputFormat] = useState<"single" | "multiple">(
         "single"
     );
+
+    // Help state
+    const [showCsvHelp, setShowCsvHelp] = useState<boolean>(false);
 
     // Handle PDF template upload
     const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -751,6 +754,78 @@ function App() {
                             </label>
                             <div className="format-info">
                                 Możliwy format: CSV
+                                <span
+                                    className="help-icon"
+                                    onClick={() =>
+                                        setShowCsvHelp((prev) => !prev)
+                                    }
+                                    onMouseEnter={() => setShowCsvHelp(true)}
+                                    onMouseLeave={() => setShowCsvHelp(false)}>
+                                    ?
+                                </span>
+                                {showCsvHelp && (
+                                    <div className="help-tooltip">
+                                        <h4>
+                                            Jak odczytywana jest zawartość CSV?
+                                        </h4>
+                                        <p>
+                                            System rozpoznaje następujące
+                                            nagłówki kolumn:
+                                        </p>
+                                        <ul>
+                                            <li>
+                                                <strong>Imię:</strong>{" "}
+                                                {firstNameVariants.join(", ")}
+                                            </li>
+                                            <li>
+                                                <strong>Nazwisko:</strong>{" "}
+                                                {lastNameVariants.join(", ")}
+                                            </li>
+                                            <li>
+                                                <strong>
+                                                    Tytuł (opcjonalny):
+                                                </strong>{" "}
+                                                {titleVariants.join(", ")}
+                                            </li>
+                                        </ul>
+                                        <p>
+                                            Jeśli nagłówki nie zostaną
+                                            rozpoznane, system użyje pierwszej,
+                                            drugiej i trzeciej kolumny jako
+                                            odpowiednio: imię, nazwisko i tytuł.
+                                        </p>
+
+                                        <table className="csv-example-table">
+                                            <caption>
+                                                Przykładowy format pliku CSV:
+                                            </caption>
+                                            <thead>
+                                                <tr>
+                                                    <th>Imię</th>
+                                                    <th>Nazwisko</th>
+                                                    <th>Tytuł</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr>
+                                                    <td>Jan</td>
+                                                    <td>Kowalski</td>
+                                                    <td>mgr</td>
+                                                </tr>
+                                                <tr>
+                                                    <td>Anna</td>
+                                                    <td>Nowak</td>
+                                                    <td>dr</td>
+                                                </tr>
+                                                <tr>
+                                                    <td>Piotr</td>
+                                                    <td>Wiśniewski</td>
+                                                    <td>prof.</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
                             </div>
                             {csvData.length > 0 && (
                                 <div className="step-check">✓</div>
