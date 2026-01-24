@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import Papa from "papaparse";
 import { getDocument } from "pdfjs-dist";
 import "./App.css";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, cmyk } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import * as pdfjs from "pdfjs-dist";
 import JSZip from "jszip";
@@ -98,7 +98,10 @@ function App() {
     const [customFontFamily, setCustomFontFamily] = useState<string>("inherit");
     const [customFontLoaded, setCustomFontLoaded] = useState<boolean>(false);
     const [fontScale, setFontScale] = useState<number>(12);
-    const [textColor, setTextColor] = useState<string>("#000000");
+    const [textColorCyan, setTextColorCyan] = useState<number>(0);
+    const [textColorMagenta, setTextColorMagenta] = useState<number>(0);
+    const [textColorYellow, setTextColorYellow] = useState<number>(0);
+    const [textColorBlack, setTextColorBlack] = useState<number>(100); // 100% black by default
     const [textPlacing, setTextPlacing] = useState<string[]>(["center"]);
     const [previewScale, setPreviewScale] = useState<number>(1);
 
@@ -119,6 +122,22 @@ function App() {
 
     // Help state
     const [showCsvHelp, setShowCsvHelp] = useState<boolean>(false);
+
+    // Helper function to convert CMYK to RGB for preview
+    const cmykToRgb = (c: number, m: number, y: number, k: number): string => {
+        // Convert percentages to 0-1 range
+        c = c / 100;
+        m = m / 100;
+        y = y / 100;
+        k = k / 100;
+
+        // Convert CMYK to RGB
+        const r = Math.round(255 * (1 - c) * (1 - k));
+        const g = Math.round(255 * (1 - m) * (1 - k));
+        const b = Math.round(255 * (1 - y) * (1 - k));
+
+        return `rgb(${r}, ${g}, ${b})`;
+    };
 
     // Handle PDF template upload
     const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -383,8 +402,20 @@ function App() {
     };
 
     // Font size
-    const handleTextColor = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setTextColor(e.target.value);
+    const handleTextColorCyan = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setTextColorCyan(parseInt(e.target.value));
+    };
+
+    const handleTextColorMagenta = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setTextColorMagenta(parseInt(e.target.value));
+    };
+
+    const handleTextColorYellow = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setTextColorYellow(parseInt(e.target.value));
+    };
+
+    const handleTextColorBlack = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setTextColorBlack(parseInt(e.target.value));
     };
 
     // Improve the useEffect that calculates font scale factors
@@ -544,10 +575,11 @@ function App() {
                         y: scaledY,
                         size: pdfFontSize,
                         font: font,
-                        color: rgb(
-                            parseInt(textColor.slice(1, 3), 16) / 255,
-                            parseInt(textColor.slice(3, 5), 16) / 255,
-                            parseInt(textColor.slice(5, 7), 16) / 255
+                        color: cmyk(
+                            textColorCyan / 100,
+                            textColorMagenta / 100,
+                            textColorYellow / 100,
+                            textColorBlack / 100
                         ),
                     });
 
@@ -643,10 +675,11 @@ function App() {
                         y: scaledY,
                         size: pdfFontSize,
                         font: singleFont, // Use the font embedded in this document
-                        color: rgb(
-                            parseInt(textColor.slice(1, 3), 16) / 255,
-                            parseInt(textColor.slice(3, 5), 16) / 255,
-                            parseInt(textColor.slice(5, 7), 16) / 255
+                        color: cmyk(
+                            textColorCyan / 100,
+                            textColorMagenta / 100,
+                            textColorYellow / 100,
+                            textColorBlack / 100
                         ),
                     });
 
@@ -868,13 +901,61 @@ function App() {
                                 />
                             </div>
                             <div className="setting-item">
-                                <label>Kolor tekstu</label>
-                                <input
-                                    type="color"
-                                    value={textColor}
-                                    onChange={handleTextColor}
-                                    disabled={isGenerating}
-                                />
+                                <label>Kolor tekstu (CMYK)</label>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <label style={{ minWidth: '70px' }}>Cyan:</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={textColorCyan}
+                                            onChange={handleTextColorCyan}
+                                            disabled={isGenerating}
+                                            style={{ flex: 1 }}
+                                        />
+                                        <span style={{ minWidth: '40px' }}>{textColorCyan}%</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <label style={{ minWidth: '70px' }}>Magenta:</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={textColorMagenta}
+                                            onChange={handleTextColorMagenta}
+                                            disabled={isGenerating}
+                                            style={{ flex: 1 }}
+                                        />
+                                        <span style={{ minWidth: '40px' }}>{textColorMagenta}%</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <label style={{ minWidth: '70px' }}>Yellow:</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={textColorYellow}
+                                            onChange={handleTextColorYellow}
+                                            disabled={isGenerating}
+                                            style={{ flex: 1 }}
+                                        />
+                                        <span style={{ minWidth: '40px' }}>{textColorYellow}%</span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                        <label style={{ minWidth: '70px' }}>Black:</label>
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="100"
+                                            value={textColorBlack}
+                                            onChange={handleTextColorBlack}
+                                            disabled={isGenerating}
+                                            style={{ flex: 1 }}
+                                        />
+                                        <span style={{ minWidth: '40px' }}>{textColorBlack}%</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         {fontFile && <div className="step-check">✓</div>}
@@ -941,7 +1022,7 @@ function App() {
                                             ? customFontFamily
                                             : "inherit",
                                         fontSize: `${fontScale}px`,
-                                        color: textColor,
+                                        color: cmykToRgb(textColorCyan, textColorMagenta, textColorYellow, textColorBlack),
                                     }}>
                                     {[
                                         csvData[0].title,
