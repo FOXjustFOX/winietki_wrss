@@ -541,54 +541,54 @@ function Winietki() {
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                     <label style={{ minWidth: '70px' }}>Cyan:</label>
                                     <input
-                                        type="range"
+                                        type="number"
                                         min="0"
                                         max="100"
                                         value={textColorCyan}
                                         onChange={handleTextColorCyan}
                                         disabled={isGenerating}
-                                        style={{ flex: 1 }}
+                                        style={{ width: '80px' }}
                                     />
-                                    <span style={{ minWidth: '40px' }}>{textColorCyan}%</span>
+                                    <span>%</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                     <label style={{ minWidth: '70px' }}>Magenta:</label>
                                     <input
-                                        type="range"
+                                        type="number"
                                         min="0"
                                         max="100"
                                         value={textColorMagenta}
                                         onChange={handleTextColorMagenta}
                                         disabled={isGenerating}
-                                        style={{ flex: 1 }}
+                                        style={{ width: '80px' }}
                                     />
-                                    <span style={{ minWidth: '40px' }}>{textColorMagenta}%</span>
+                                    <span>%</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                     <label style={{ minWidth: '70px' }}>Yellow:</label>
                                     <input
-                                        type="range"
+                                        type="number"
                                         min="0"
                                         max="100"
                                         value={textColorYellow}
                                         onChange={handleTextColorYellow}
                                         disabled={isGenerating}
-                                        style={{ flex: 1 }}
+                                        style={{ width: '80px' }}
                                     />
-                                    <span style={{ minWidth: '40px' }}>{textColorYellow}%</span>
+                                    <span>%</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                     <label style={{ minWidth: '70px' }}>Black:</label>
                                     <input
-                                        type="range"
+                                        type="number"
                                         min="0"
                                         max="100"
                                         value={textColorBlack}
                                         onChange={handleTextColorBlack}
                                         disabled={isGenerating}
-                                        style={{ flex: 1 }}
+                                        style={{ width: '80px' }}
                                     />
-                                    <span style={{ minWidth: '40px' }}>{textColorBlack}%</span>
+                                    <span>%</span>
                                 </div>
                             </div>
                         </div>
