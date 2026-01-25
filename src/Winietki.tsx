@@ -544,6 +544,7 @@ function Winietki() {
                                         type="number"
                                         min="0"
                                         max="100"
+                                        step="1"
                                         value={textColorCyan}
                                         onChange={handleTextColorCyan}
                                         disabled={isGenerating}
@@ -557,6 +558,7 @@ function Winietki() {
                                         type="number"
                                         min="0"
                                         max="100"
+                                        step="1"
                                         value={textColorMagenta}
                                         onChange={handleTextColorMagenta}
                                         disabled={isGenerating}
@@ -570,6 +572,7 @@ function Winietki() {
                                         type="number"
                                         min="0"
                                         max="100"
+                                        step="1"
                                         value={textColorYellow}
                                         onChange={handleTextColorYellow}
                                         disabled={isGenerating}
@@ -583,6 +586,7 @@ function Winietki() {
                                         type="number"
                                         min="0"
                                         max="100"
+                                        step="1"
                                         value={textColorBlack}
                                         onChange={handleTextColorBlack}
                                         disabled={isGenerating}
