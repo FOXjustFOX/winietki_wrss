@@ -471,6 +471,9 @@ function Winietki() {
                     ),
                 });
 
+                // Log winietka creation
+                console.log(`created: ${person.firstName} ${person.lastName}${person.title ? ` and title ${person.title}` : ''} #${i + 1} from csv`);
+
                 // Update progress
                 setProgress(Math.round(((i + 1) / csvData.length) * 100));
             }
