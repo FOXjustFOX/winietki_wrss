@@ -221,12 +221,12 @@ function App() {
                                         : ""
                                     ).trim(),
                                     lastName: (columns.length > 1 &&
-                                    typeof columns[1] === "string"
+                                        typeof columns[1] === "string"
                                         ? columns[1]
                                         : ""
                                     ).trim(),
                                     title: (columns.length > 2 &&
-                                    typeof columns[2] === "string"
+                                        typeof columns[2] === "string"
                                         ? columns[2]
                                         : ""
                                     ).trim(),
@@ -237,12 +237,12 @@ function App() {
                             return {
                                 firstName:
                                     firstNameCol &&
-                                    typeof row[firstNameCol] === "string"
+                                        typeof row[firstNameCol] === "string"
                                         ? row[firstNameCol]!.trim()
                                         : "",
                                 lastName:
                                     lastNameCol &&
-                                    typeof row[lastNameCol] === "string"
+                                        typeof row[lastNameCol] === "string"
                                         ? row[lastNameCol]!.trim()
                                         : "",
                                 title: titleCol
@@ -511,10 +511,19 @@ function App() {
 
             if (outputFormat === "single") {
                 // Generate single merged PDF
+                console.log(`Preparing ${csvData.length} pages (batch copy)...`);
+
+                // OPTIMIZATION: Copy all pages in one operation to share resources and reduce file size
+                const pageIndices = new Array(csvData.length).fill(0);
+                const pages = await mergedDoc.copyPages(templateDoc, pageIndices);
+
                 for (let i = 0; i < csvData.length; i++) {
                     const person = csvData[i];
-                    const page = await mergedDoc.copyPages(templateDoc, [0]);
-                    mergedDoc.addPage(page[0]);
+                    console.log(`Processing winietka ${i + 1}/${csvData.length}: ${[person.title, person.firstName, person.lastName].filter(Boolean).join(" ")}`);
+
+                    // Add the pre-copied page
+                    const page = pages[i];
+                    mergedDoc.addPage(page);
 
                     fullName = [person.title, person.firstName, person.lastName]
                         .filter(Boolean)
@@ -539,7 +548,7 @@ function App() {
                     }
 
                     // Draw text with the actual PDF font size
-                    page[0].drawText(fullName, {
+                    page.drawText(fullName, {
                         x: setX,
                         y: scaledY,
                         size: pdfFontSize,
@@ -554,8 +563,10 @@ function App() {
                     setProgress(Math.round(((i + 1) / csvData.length) * 100));
                 }
 
+                console.log("Finished generation loop. Serializing PDF (this may take a moment)...");
                 const pdfBytes = await mergedDoc.save();
-                const blob = new Blob([pdfBytes], { type: "application/pdf" });
+                console.log(`PDF serialized. Size: ${pdfBytes.byteLength} bytes. Creating Blob...`);
+                const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" });
                 const url = URL.createObjectURL(blob);
 
                 const link = document.createElement("a");
@@ -570,6 +581,7 @@ function App() {
 
                 for (let i = 0; i < csvData.length; i++) {
                     const person = csvData[i];
+                    console.log(`Creating winietka ${i + 1}/${csvData.length}: ${[person.title, person.firstName, person.lastName].filter(Boolean).join(" ")}`);
                     const singleDoc = await PDFDocument.create();
                     singleDoc.registerFontkit(fontkit);
 
@@ -703,9 +715,8 @@ function App() {
 
                         <div>
                             <label
-                                className={`upload-button ${
-                                    pdfTemplate ? "has-file" : ""
-                                }`}
+                                className={`upload-button ${pdfTemplate ? "has-file" : ""
+                                    }`}
                                 htmlFor="pdfUpload">
                                 <span>
                                     {pdfTemplate ? pdfTemplate.name : "Dodaj"}
@@ -735,9 +746,8 @@ function App() {
                         </div>
                         <div>
                             <label
-                                className={`upload-button ${
-                                    csvData.length > 0 ? "has-file" : ""
-                                }`}
+                                className={`upload-button ${csvData.length > 0 ? "has-file" : ""
+                                    }`}
                                 htmlFor="csvUpload">
                                 <span>
                                     {csvData.length > 0
@@ -840,9 +850,8 @@ function App() {
                             <div className="setting-item">
                                 <label>Czcionka</label>
                                 <label
-                                    className={`upload-button ${
-                                        fontFile ? "has-file" : ""
-                                    }`}
+                                    className={`upload-button ${fontFile ? "has-file" : ""
+                                        }`}
                                     htmlFor="fontUpload">
                                     <span>
                                         {fontFile ? fontFile.name : "Dodaj"}
@@ -931,9 +940,8 @@ function App() {
                             />
                             {csvData.length > 0 && (
                                 <div
-                                    className={`name-preview ${
-                                        isDragging ? "dragging" : ""
-                                    }`}
+                                    className={`name-preview ${isDragging ? "dragging" : ""
+                                        }`}
                                     style={{
                                         left: namePosition.x,
                                         top: namePosition.y,
