@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import Papa from "papaparse";
 import { getDocument } from "pdfjs-dist";
 import "./App.css";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, cmyk } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import * as pdfjs from "pdfjs-dist";
 import JSZip from "jszip";
@@ -87,6 +87,45 @@ const findMatchingColumn = (
         }
     }
     return null;
+};
+
+// Helper function to convert Hex to CMYK
+const hexToCmyk = (hex: string) => {
+    let r = 0,
+        g = 0,
+        b = 0;
+    // Handle 3-digit hex
+    if (hex.length === 4) {
+        r = parseInt("0x" + hex[1] + hex[1]);
+        g = parseInt("0x" + hex[2] + hex[2]);
+        b = parseInt("0x" + hex[3] + hex[3]);
+    }
+    // Handle 6-digit hex
+    else if (hex.length === 7) {
+        r = parseInt("0x" + hex[1] + hex[2]);
+        g = parseInt("0x" + hex[3] + hex[4]);
+        b = parseInt("0x" + hex[5] + hex[6]);
+    }
+
+    // Normalize RGB to 0-1 range
+    let c = 1 - r / 255;
+    let m = 1 - g / 255;
+    let y = 1 - b / 255;
+
+    // Find K (black key)
+    let k = Math.min(c, Math.min(m, y));
+
+    // Handle pure black
+    if (k === 1) {
+        return cmyk(0, 0, 0, 1);
+    }
+
+    // Calculate C, M, Y
+    c = (c - k) / (1 - k);
+    m = (m - k) / (1 - k);
+    y = (y - k) / (1 - k);
+
+    return cmyk(c, m, y, k);
 };
 
 function App() {
@@ -553,11 +592,7 @@ function App() {
                         y: scaledY,
                         size: pdfFontSize,
                         font: font,
-                        color: rgb(
-                            parseInt(textColor.slice(1, 3), 16) / 255,
-                            parseInt(textColor.slice(3, 5), 16) / 255,
-                            parseInt(textColor.slice(5, 7), 16) / 255
-                        ),
+                        color: hexToCmyk(textColor),
                     });
 
                     setProgress(Math.round(((i + 1) / csvData.length) * 100));
@@ -655,11 +690,7 @@ function App() {
                         y: scaledY,
                         size: pdfFontSize,
                         font: singleFont, // Use the font embedded in this document
-                        color: rgb(
-                            parseInt(textColor.slice(1, 3), 16) / 255,
-                            parseInt(textColor.slice(3, 5), 16) / 255,
-                            parseInt(textColor.slice(5, 7), 16) / 255
-                        ),
+                        color: hexToCmyk(textColor),
                     });
 
                     // Save the single PDF
@@ -878,12 +909,32 @@ function App() {
                             </div>
                             <div className="setting-item">
                                 <label>Kolor tekstu</label>
-                                <input
-                                    type="color"
-                                    value={textColor}
-                                    onChange={handleTextColor}
-                                    disabled={isGenerating}
-                                />
+                                <div style={{ display: "flex", gap: "10px", alignItems: "center", width: "100%" }}>
+                                    <input
+                                        type="color"
+                                        value={textColor}
+                                        onChange={handleTextColor}
+                                        disabled={isGenerating}
+                                        style={{ flex: 1, height: "40px", cursor: "pointer" }}
+                                    />
+                                    <input
+                                        type="text"
+                                        value={textColor}
+                                        onChange={handleTextColor}
+                                        disabled={isGenerating}
+                                        placeholder="#000000"
+                                        style={{
+                                            width: "90px",
+                                            flexShrink: 0,
+                                            padding: "8px",
+                                            borderRadius: "4px",
+                                            border: "1px solid #ccc",
+                                            textTransform: "uppercase",
+                                            textAlign: "center"
+                                        }}
+                                        maxLength={7}
+                                    />
+                                </div>
                             </div>
                         </div>
                         {fontFile && <div className="step-check">✓</div>}
