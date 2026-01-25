@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import Papa from "papaparse";
 import { getDocument } from "pdfjs-dist";
 import "./App.css";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, cmyk } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 
 import * as pdfjs from "pdfjs-dist";
@@ -29,6 +29,28 @@ interface CSVRow {
     Nazwisko?: string;
     title?: string;
     Tytuł?: string;
+}
+
+// Convert RGB hex color to CMYK values
+function rgbToCmyk(hexColor: string): { c: number; m: number; y: number; k: number } {
+    // Parse hex color to RGB (0-255)
+    const r = parseInt(hexColor.slice(1, 3), 16) / 255;
+    const g = parseInt(hexColor.slice(3, 5), 16) / 255;
+    const b = parseInt(hexColor.slice(5, 7), 16) / 255;
+
+    // Convert RGB to CMYK
+    const k = 1 - Math.max(r, g, b);
+    
+    if (k === 1) {
+        // Pure black
+        return { c: 0, m: 0, y: 0, k: 1 };
+    }
+    
+    const c = (1 - r - k) / (1 - k);
+    const m = (1 - g - k) / (1 - k);
+    const y = (1 - b - k) / (1 - k);
+    
+    return { c, m, y, k };
 }
 
 function Winietki() {
@@ -415,15 +437,19 @@ function Winietki() {
                         setX = pageWidth / 2 - textWidth / 2;
                 }
 
+                // Convert hex color to CMYK
+                const cmykColor = rgbToCmyk(textColor);
+                
                 page[0].drawText(fullName, {
                     x: setX,
                     y: scaledY,
                     size: pdfFontSize, // Use the configured PDF font size
                     font: font,
-                    color: rgb(
-                        parseInt(textColor.slice(1, 3), 16) / 255,
-                        parseInt(textColor.slice(3, 5), 16) / 255,
-                        parseInt(textColor.slice(5, 7), 16) / 255
+                    color: cmyk(
+                        cmykColor.c,
+                        cmykColor.m,
+                        cmykColor.y,
+                        cmykColor.k
                     ),
                 });
 
