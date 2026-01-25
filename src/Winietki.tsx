@@ -31,8 +31,26 @@ interface CSVRow {
     Tytuł?: string;
 }
 
-// Convert RGB hex color to CMYK values
+/**
+ * Converts an RGB hex color to CMYK color space values.
+ * Uses the standard RGB to CMYK conversion formula for print output.
+ * 
+ * @param hexColor - Hex color string in format #RRGGBB (e.g., "#000000", "#FF5733")
+ * @returns Object containing CMYK values (c, m, y, k) in range 0-1
+ * 
+ * Conversion formula:
+ * K = 1 - max(R, G, B)
+ * C = (1 - R - K) / (1 - K)
+ * M = (1 - G - K) / (1 - K)
+ * Y = (1 - B - K) / (1 - K)
+ */
 function rgbToCmyk(hexColor: string): { c: number; m: number; y: number; k: number } {
+    // Validate hex color format
+    if (!/^#[0-9A-Fa-f]{6}$/.test(hexColor)) {
+        console.warn(`Invalid hex color format: ${hexColor}, using black as fallback`);
+        return { c: 0, m: 0, y: 0, k: 1 };
+    }
+    
     // Parse hex color to RGB (0-255)
     const r = parseInt(hexColor.slice(1, 3), 16) / 255;
     const g = parseInt(hexColor.slice(3, 5), 16) / 255;
