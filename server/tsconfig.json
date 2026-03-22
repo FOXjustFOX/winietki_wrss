@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "target": "ES2020",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "esModuleInterop": true,
+        "strict": true,
+        "skipLibCheck": true,
+        "outDir": "../dist-server",
+        "rootDir": "..",
+        "declaration": false,
+        "sourceMap": true,
+        "resolveJsonModule": true
+    },
+    "include": [
+        "./**/*.ts",
+        "../src/shared/**/*.ts"
+    ]
+}

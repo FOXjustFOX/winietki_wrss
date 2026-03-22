@@ -9,20 +9,22 @@ RUN npm install
 # Copy all source code
 COPY . .
 
-# Build the production bundle (Vite will output to /app/dist)
-RUN npm run build
+# Build frontend and server
+RUN npm run build && npm run build:server
 
 # (2) Production Stage
-FROM nginx:alpine
+FROM node:20-alpine
+WORKDIR /app
 
-# Remove default static files
-RUN rm -rf /usr/share/nginx/html/*
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/dist-server ./dist-server
+COPY --from=build /app/public/fonts ./public/fonts
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./
 
-# Copy the built files from the first stage
-COPY --from=build /app/dist /usr/share/nginx/html
+ENV NODE_ENV=production
+ENV PORT=80
 
-# Expose port 80 only
 EXPOSE 80
 
-# Use the default Nginx start command
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "dist-server/server/index.js"]

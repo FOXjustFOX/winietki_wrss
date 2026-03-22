@@ -2,10 +2,21 @@ import { useState, useRef, useEffect } from "react";
 import Papa from "papaparse";
 import { getDocument } from "pdfjs-dist";
 import "./App.css";
-import { PDFDocument, cmyk } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
+import { PDFDocument } from "pdf-lib";
 import * as pdfjs from "pdfjs-dist";
 import JSZip from "jszip";
+import type { Person, CSVRow } from "./shared/types";
+import {
+    AVAILABLE_FONTS,
+    findMatchingColumn,
+    firstNameVariants,
+    lastNameVariants,
+    titleVariants,
+} from "./shared/constants";
+import {
+    generateSinglePdf,
+    generateMultiplePdfs,
+} from "./shared/pdf-generator";
 
 // Configure PDF.js worker with fallback for offline use
 
@@ -17,116 +28,15 @@ const setPdfWorker = () => {
         pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.0.375/pdf.worker.min.mjs`;
     } catch {
         console.warn(
-            "Could not load remote PDF.js worker, trying local fallback..."
+            "Could not load remote PDF.js worker, trying local fallback...",
         );
         // Try to use local worker first (needs to be in public directory)
         pdfjs.GlobalWorkerOptions.workerSrc = `/assets/pdf.worker.min.mjs`;
-
-        // Alternative:  can include a version check to ensure compatibility
-        // const pdfjsVersion = pdfjs.version;
-        // pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.${pdfjsVersion}.min.js`;
     }
 };
 
 // Initialize the worker
 setPdfWorker();
-
-interface Person {
-    firstName: string;
-    lastName: string;
-    title?: string;
-}
-
-interface CSVRow {
-    [key: string]: string | undefined;
-}
-
-// Helper functions for CSV column matching
-const firstNameVariants = [
-    "firstName",
-    "first_name",
-    "Imię",
-    "imię",
-    "imie",
-    "name",
-    "Name",
-    "first",
-    "First",
-    "given_name",
-];
-const lastNameVariants = [
-    "lastName",
-    "last_name",
-    "Nazwisko",
-    "nazwisko",
-    "surname",
-    "Surname",
-    "family_name",
-    "last",
-    "Last",
-];
-const titleVariants = [
-    "title",
-    "Tytuł",
-    "tytuł",
-    "tytul",
-    "prefix",
-    "Prefix",
-    "honorific",
-    "degree",
-];
-
-// Function to find which column matches a specific field
-const findMatchingColumn = (
-    headers: string[],
-    variants: string[]
-): string | null => {
-    for (const header of headers) {
-        if (variants.includes(header.trim())) {
-            return header;
-        }
-    }
-    return null;
-};
-
-// Helper function to convert Hex to CMYK
-const hexToCmyk = (hex: string) => {
-    let r = 0,
-        g = 0,
-        b = 0;
-    // Handle 3-digit hex
-    if (hex.length === 4) {
-        r = parseInt("0x" + hex[1] + hex[1]);
-        g = parseInt("0x" + hex[2] + hex[2]);
-        b = parseInt("0x" + hex[3] + hex[3]);
-    }
-    // Handle 6-digit hex
-    else if (hex.length === 7) {
-        r = parseInt("0x" + hex[1] + hex[2]);
-        g = parseInt("0x" + hex[3] + hex[4]);
-        b = parseInt("0x" + hex[5] + hex[6]);
-    }
-
-    // Normalize RGB to 0-1 range
-    let c = 1 - r / 255;
-    let m = 1 - g / 255;
-    let y = 1 - b / 255;
-
-    // Find K (black key)
-    let k = Math.min(c, Math.min(m, y));
-
-    // Handle pure black
-    if (k === 1) {
-        return cmyk(0, 0, 0, 1);
-    }
-
-    // Calculate C, M, Y
-    c = (c - k) / (1 - k);
-    m = (m - k) / (1 - k);
-    y = (y - k) / (1 - k);
-
-    return cmyk(c, m, y, k);
-};
 
 function App() {
     // File states
@@ -134,12 +44,17 @@ function App() {
     const [csvData, setCsvData] = useState<Person[]>([]);
     const [fontFile, setFontFile] = useState<File | null>(null);
     const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
-    const [customFontFamily, setCustomFontFamily] = useState<string>("inherit");
-    const [customFontLoaded, setCustomFontLoaded] = useState<boolean>(false);
+    const [activeFontFamily, setActiveFontFamily] = useState<string>("inherit");
     const [fontScale, setFontScale] = useState<number>(12);
     const [textColor, setTextColor] = useState<string>("#000000");
     const [textPlacing, setTextPlacing] = useState<string[]>(["center"]);
     const [previewScale, setPreviewScale] = useState<number>(1);
+    const [selectedFont, setSelectedFont] = useState<string>(
+        AVAILABLE_FONTS[0].name,
+    );
+    const [curlCopied, setCurlCopied] = useState<boolean>(false);
+    const [curlCommand, setCurlCommand] = useState<string | null>(null);
+    const loadedFontsRef = useRef<Set<string>>(new Set());
 
     // Position states
     const [namePosition, setNamePosition] = useState({ x: 100, y: 100 });
@@ -153,206 +68,270 @@ function App() {
 
     // Add new state for output format
     const [outputFormat, setOutputFormat] = useState<"single" | "multiple">(
-        "single"
+        "single",
     );
 
     // Help state
     const [showCsvHelp, setShowCsvHelp] = useState<boolean>(false);
 
-    // Handle PDF template upload
-    const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            setPdfTemplate(file);
+    // Flatten state
+    const [shouldFlatten, setShouldFlatten] = useState<boolean>(false);
 
-            // Read the PDF file
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await getDocument({ data: arrayBuffer }).promise;
-            const page = await pdf.getPage(1);
+    // Drag states
+    const [isDragActive, setIsDragActive] = useState<boolean>(false);
+    const [isPdfDragActive, setIsPdfDragActive] = useState<boolean>(false);
+    const [isCsvDragActive, setIsCsvDragActive] = useState<boolean>(false);
+    const [globalDragType, setGlobalDragType] = useState<
+        "pdf" | "csv" | "font" | null
+    >(null);
 
-            // Create a canvas to render the page
-            const viewport = page.getViewport({ scale: 1.5 });
-            const canvas = document.createElement("canvas");
-            const context = canvas.getContext("2d");
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
+    // Load built-in font for preview when selectedFont changes
+    useEffect(() => {
+        if (selectedFont === "Custom") return;
 
-            if (context) {
-                const renderContext = {
-                    canvasContext: context,
-                    viewport: viewport,
-                };
-                await page.render(renderContext).promise;
-            } else {
-                console.error("Failed to get canvas context");
-            }
+        const fontConfig = AVAILABLE_FONTS.find((f) => f.name === selectedFont);
+        if (!fontConfig) return;
 
-            // Convert the canvas to a data URL
-            const dataUrl = canvas.toDataURL();
-            setPdfPreviewUrl(dataUrl);
+        const fontFamilyName = `builtin-${selectedFont.replace(/\s+/g, "-").toLowerCase()}`;
+
+        // If we already loaded this font, just set it active
+        if (loadedFontsRef.current.has(fontFamilyName)) {
+            setActiveFontFamily(fontFamilyName);
+            return;
         }
-    };
 
-    // Handle CSV upload
-    const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            console.log("CSV file selected:", file.name);
-
-            Papa.parse<CSVRow>(file, {
-                header: true,
-                skipEmptyLines: true,
-                complete: (results) => {
-                    console.log("Raw CSV data:", results.data);
-
-                    // Get headers
-                    const headers = results.meta.fields || [];
-                    console.log("CSV headers:", headers);
-
-                    // Find matching columns for each field
-                    const firstNameCol = findMatchingColumn(
-                        headers,
-                        firstNameVariants
-                    );
-                    const lastNameCol = findMatchingColumn(
-                        headers,
-                        lastNameVariants
-                    );
-                    const titleCol = findMatchingColumn(headers, titleVariants);
-
-                    // Check if we need to use default positions
-                    const useDefaultPositions = !firstNameCol && !lastNameCol;
-                    console.log(
-                        "Using default positions:",
-                        useDefaultPositions
-                    );
-
-                    const persons: Person[] = (results.data as CSVRow[])
-                        .filter((row) => {
-                            // For default positions
-                            if (useDefaultPositions) {
-                                // Get first three columns values, regardless of their names
-                                const columns = Object.values(row);
-                                return (
-                                    columns.length > 0 &&
-                                    typeof columns[0] === "string" &&
-                                    columns[0].trim() !== ""
-                                );
-                            }
-
-                            // For named columns
-                            const hasName =
-                                (firstNameCol &&
-                                    typeof row[firstNameCol] === "string" &&
-                                    row[firstNameCol]!.trim() !== "") ||
-                                (lastNameCol &&
-                                    typeof row[lastNameCol] === "string" &&
-                                    row[lastNameCol]!.trim() !== "");
-                            return hasName;
-                        })
-                        .map((row) => {
-                            if (useDefaultPositions) {
-                                // Get the first three columns as firstName, lastName, title
-                                const columns = Object.values(row);
-                                return {
-                                    firstName: (typeof columns[0] === "string"
-                                        ? columns[0]
-                                        : ""
-                                    ).trim(),
-                                    lastName: (columns.length > 1 &&
-                                        typeof columns[1] === "string"
-                                        ? columns[1]
-                                        : ""
-                                    ).trim(),
-                                    title: (columns.length > 2 &&
-                                        typeof columns[2] === "string"
-                                        ? columns[2]
-                                        : ""
-                                    ).trim(),
-                                };
-                            }
-
-                            // For named columns
-                            return {
-                                firstName:
-                                    firstNameCol &&
-                                        typeof row[firstNameCol] === "string"
-                                        ? row[firstNameCol]!.trim()
-                                        : "",
-                                lastName:
-                                    lastNameCol &&
-                                        typeof row[lastNameCol] === "string"
-                                        ? row[lastNameCol]!.trim()
-                                        : "",
-                                title: titleCol
-                                    ? (row[titleCol] || "").trim()
-                                    : "",
-                            };
-                        })
-                        .filter(
-                            (person) =>
-                                person.firstName !== "" ||
-                                person.lastName !== ""
-                        );
-
-                    console.log("Final persons array:", persons);
-                    setCsvData(persons);
-                },
-                error: (error) => {
-                    console.error("Error parsing CSV:", error);
-                    alert("Error parsing CSV file. Please check the format.");
-                },
-                dynamicTyping: true,
-                encoding: "utf-8",
+        fetch(fontConfig.path)
+            .then((res) => res.arrayBuffer())
+            .then((buffer) => {
+                const fontFace = new FontFace(fontFamilyName, buffer);
+                return fontFace.load();
+            })
+            .then((loaded) => {
+                document.fonts.add(loaded);
+                loadedFontsRef.current.add(fontFamilyName);
+                setActiveFontFamily(fontFamilyName);
+            })
+            .catch((err) => {
+                console.error("Error loading built-in font for preview:", err);
+                setActiveFontFamily("inherit");
             });
+    }, [selectedFont]);
+
+    // Helper to detect file type from drag event
+    const getFileTypeFromDrag = (
+        e: React.DragEvent,
+    ): "pdf" | "csv" | "font" | null => {
+        if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+            const item = e.dataTransfer.items[0];
+            if (item.type === "application/pdf") return "pdf";
+            if (
+                item.type === "text/csv" ||
+                item.type === "application/vnd.ms-excel"
+            )
+                return "csv";
+            if (
+                item.type === "font/ttf" ||
+                item.type === "font/sfnt" ||
+                item.type === "application/x-font-ttf" ||
+                item.type === ""
+            ) {
+                const types = Array.from(e.dataTransfer.types);
+                if (types.includes("Files")) {
+                    return null;
+                }
+            }
+        }
+        return null;
+    };
+
+    // Helper functions for file processing
+    const processPdfFile = async (file: File) => {
+        setPdfTemplate(file);
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await getDocument({ data: arrayBuffer }).promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        if (context) {
+            const renderContext = {
+                canvasContext: context,
+                viewport: viewport,
+            };
+            await page.render(renderContext).promise;
+            setPdfPreviewUrl(canvas.toDataURL());
         }
     };
 
-    // Handle font upload with preview support
-    const handleFontUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            const file = e.target.files[0];
-            setFontFile(file);
+    const processCsvFile = (file: File) => {
+        Papa.parse<CSVRow>(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: (results) => {
+                const headers = results.meta.fields || [];
+                const firstNameCol = findMatchingColumn(
+                    headers,
+                    firstNameVariants,
+                );
+                const lastNameCol = findMatchingColumn(
+                    headers,
+                    lastNameVariants,
+                );
+                const titleCol = findMatchingColumn(headers, titleVariants);
+                const useDefaultPositions = !firstNameCol && !lastNameCol;
 
-            // Create a unique font family name based on file name
-            const fontFamilyName = `custom-font-${Date.now()}`;
-
-            // Load the font for preview
-            const reader = new FileReader();
-            reader.onload = (event: ProgressEvent<FileReader>) => {
-                if (event.target && event.target.result) {
-                    // Create and load the font
-                    const fontFace = new FontFace(
-                        fontFamilyName,
-                        event.target.result as ArrayBuffer
+                const persons: Person[] = (results.data as CSVRow[])
+                    .filter((row) => {
+                        if (useDefaultPositions) {
+                            const columns = Object.values(row);
+                            return (
+                                columns.length > 0 &&
+                                typeof columns[0] === "string" &&
+                                columns[0].trim() !== ""
+                            );
+                        }
+                        return (
+                            (firstNameCol && row[firstNameCol]?.trim()) ||
+                            (lastNameCol && row[lastNameCol]?.trim())
+                        );
+                    })
+                    .map((row) => {
+                        if (useDefaultPositions) {
+                            const columns = Object.values(row);
+                            return {
+                                firstName: (typeof columns[0] === "string"
+                                    ? columns[0]
+                                    : ""
+                                ).trim(),
+                                lastName: (columns.length > 1 &&
+                                typeof columns[1] === "string"
+                                    ? columns[1]
+                                    : ""
+                                ).trim(),
+                                title: (columns.length > 2 &&
+                                typeof columns[2] === "string"
+                                    ? columns[2]
+                                    : ""
+                                ).trim(),
+                            };
+                        }
+                        return {
+                            firstName:
+                                firstNameCol &&
+                                typeof row[firstNameCol] === "string"
+                                    ? row[firstNameCol]!.trim()
+                                    : "",
+                            lastName:
+                                lastNameCol &&
+                                typeof row[lastNameCol] === "string"
+                                    ? row[lastNameCol]!.trim()
+                                    : "",
+                            title: titleCol ? (row[titleCol] || "").trim() : "",
+                        };
+                    })
+                    .filter(
+                        (person) =>
+                            person.firstName !== "" || person.lastName !== "",
                     );
+                setCsvData(persons);
+            },
+            error: () => alert("Error parsing CSV file."),
+            dynamicTyping: true,
+            encoding: "utf-8",
+        });
+    };
 
-                    fontFace
-                        .load()
-                        .then((loadedFont) => {
-                            // Add the font to the document
-                            document.fonts.add(loadedFont);
+    const processFontFile = (file: File) => {
+        setFontFile(file);
+        setSelectedFont("Custom");
+        const fontFamilyName = `custom-font-${Date.now()}`;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            if (event.target?.result) {
+                const fontFace = new FontFace(
+                    fontFamilyName,
+                    event.target.result as ArrayBuffer,
+                );
+                fontFace
+                    .load()
+                    .then((loaded) => {
+                        document.fonts.add(loaded);
+                        setActiveFontFamily(fontFamilyName);
+                    })
+                    .catch(() => {
+                        setActiveFontFamily("inherit");
+                    });
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    };
 
-                            // Set the font family for the preview
-                            setCustomFontFamily(fontFamilyName);
-                            setCustomFontLoaded(true);
-                            console.log(
-                                "Custom font loaded for preview:",
-                                fontFamilyName
-                            );
-                        })
-                        .catch((err) => {
-                            console.error(
-                                "Error loading font for preview:",
-                                err
-                            );
-                            setCustomFontFamily("inherit");
-                            setCustomFontLoaded(false);
-                        });
-                }
-            };
-            reader.readAsArrayBuffer(file);
+    // Generic Drag Handlers
+    const handleDrag = (
+        e: React.DragEvent,
+        setDragActiveState: (active: boolean) => void,
+        type: "pdf" | "csv" | "font",
+    ) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === "dragenter" || e.type === "dragover") {
+            setDragActiveState(true);
+            const detectedType = getFileTypeFromDrag(e);
+            if (detectedType) {
+                setGlobalDragType(detectedType);
+            } else {
+                setGlobalDragType(type);
+            }
+        } else if (e.type === "dragleave") {
+            setDragActiveState(false);
         }
+    };
+
+    const handleDrop = (
+        e: React.DragEvent,
+        setDragActiveState: (active: boolean) => void,
+        type: "pdf" | "csv" | "font",
+    ) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragActiveState(false);
+        setGlobalDragType(null);
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            const file = e.dataTransfer.files[0];
+            if (type === "pdf" && file.name.toLowerCase().endsWith(".pdf")) {
+                processPdfFile(file);
+            } else if (
+                type === "csv" &&
+                file.name.toLowerCase().endsWith(".csv")
+            ) {
+                processCsvFile(file);
+            } else if (
+                type === "font" &&
+                file.name.toLowerCase().endsWith(".ttf")
+            ) {
+                processFontFile(file);
+            } else {
+                alert(
+                    `Proszę przesłać poprawny plik dla formatu .${type === "font" ? "ttf" : type}`,
+                );
+            }
+        }
+    };
+
+    // Handle inputs
+    const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0])
+            processPdfFile(e.target.files[0]);
+    };
+    const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0])
+            processCsvFile(e.target.files[0]);
+    };
+    const handleFontUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0])
+            processFontFile(e.target.files[0]);
     };
 
     // Mouse handlers for positioning
@@ -394,14 +373,10 @@ function App() {
                     const page = pdfDoc.getPage(0);
                     const { width: pdfWidth } = page.getSize();
 
-                    // Get preview width
                     const previewWidth = previewRef.current?.clientWidth || 500;
 
-                    // Calculate scale factor
                     const scale = previewWidth / pdfWidth;
                     setPreviewScale(scale);
-
-                    console.log("Scale factor:", scale);
                 } catch (error) {
                     console.error("Error calculating scale:", error);
                 }
@@ -416,7 +391,6 @@ function App() {
         const newSizePt = parseInt(e.target.value);
         setPdfFontSize(newSizePt);
 
-        // Scale the preview font size based on the ratio between preview and PDF dimensions
         const scaleFactor = previewScale || 1;
         setFontScale(Math.round(newSizePt * scaleFactor));
     };
@@ -431,20 +405,16 @@ function App() {
         if (pdfTemplate && previewRef.current) {
             const calculateFontScale = async () => {
                 try {
-                    // Get PDF dimensions
                     const arrayBuffer = await pdfTemplate.arrayBuffer();
                     const pdfDoc = await PDFDocument.load(arrayBuffer);
                     const page = pdfDoc.getPage(0);
                     const { width: pdfWidth } = page.getSize();
 
-                    // Get preview dimensions
                     const previewWidth = previewRef.current?.clientWidth || 500;
 
-                    // Calculate scale factor for font sizing
                     const scaleFactor = previewWidth / pdfWidth;
                     setPreviewScale(scaleFactor);
 
-                    // Update font scale based on new scale factor
                     setPdfFontSize((prevSize) => {
                         setFontScale(Math.round(prevSize * scaleFactor));
                         return prevSize;
@@ -456,14 +426,12 @@ function App() {
 
             calculateFontScale();
 
-            // Add resize listener to update font scale when window/preview dimensions change
             const handleResize = () => {
                 calculateFontScale();
             };
 
             window.addEventListener("resize", handleResize);
 
-            // Clean up
             return () => {
                 window.removeEventListener("resize", handleResize);
             };
@@ -472,12 +440,81 @@ function App() {
 
     // Add handler for output format change
     const handleOutputFormatChange = (
-        e: React.ChangeEvent<HTMLSelectElement>
+        e: React.ChangeEvent<HTMLSelectElement>,
     ) => {
         setOutputFormat(e.target.value as "single" | "multiple");
     };
 
-    // Update the generatePDFs function to handle both formats
+    // Resolve font bytes for PDF generation
+    const resolveFontBytes = async (): Promise<ArrayBuffer> => {
+        if (selectedFont === "Custom" && fontFile) {
+            return fontFile.arrayBuffer();
+        }
+        const fontConfig =
+            AVAILABLE_FONTS.find((f) => f.name === selectedFont) ||
+            AVAILABLE_FONTS[0];
+        const response = await fetch(fontConfig.path);
+        return response.arrayBuffer();
+    };
+
+    // Build curl command from current settings
+    const buildCurlCommand = async (): Promise<string> => {
+        const previewWidth = previewRef.current?.clientWidth ?? 500;
+        const previewHeight = previewRef.current?.clientHeight ?? 700;
+
+        let posX = 0.5;
+        let posY = 0.5;
+
+        if (pdfTemplate) {
+            const templateBytes = await pdfTemplate.arrayBuffer();
+            const templateDoc = await PDFDocument.load(templateBytes);
+            const page = templateDoc.getPage(0);
+            const { width: pageWidth, height: pageHeight } = page.getSize();
+
+            const absX = (namePosition.x / previewWidth) * pageWidth + 5;
+            const absY = (namePosition.y / previewHeight) * pageHeight + 17;
+            posX = Math.round((absX / pageWidth) * 10000) / 10000;
+            posY = Math.round((absY / pageHeight) * 10000) / 10000;
+        }
+
+        const outputExt = outputFormat === "single" ? "pdf" : "zip";
+        const lines = [
+            `curl -X POST "$BASE_URL/api/generate" \\`,
+            `  -F "template=@template.pdf" \\`,
+            `  -F "csv=@winietki.csv" \\`,
+            ...(selectedFont === "Custom" && fontFile
+                ? [`  -F "font=@${fontFile.name}" \\`]
+                : []),
+            `  -F "fontName=${selectedFont === "Custom" ? "Custom" : selectedFont}" \\`,
+            `  -F "fontSize=${pdfFontSize}" \\`,
+            `  -F "textColor=${textColor}" \\`,
+            `  -F "textAlign=${textPlacing[0]}" \\`,
+            `  -F "positionX=${posX}" \\`,
+            `  -F "positionY=${posY}" \\`,
+            `  -F "outputFormat=${outputFormat}" \\`,
+            `  -F "flatten=${shouldFlatten}" \\`,
+            `  -o "output.${outputExt}"`,
+        ];
+
+        return lines.join("\n");
+    };
+
+    const showCurlCommand = async () => {
+        const cmd = await buildCurlCommand();
+        setCurlCommand(cmd);
+    };
+
+    const confirmCopyCurl = async () => {
+        if (!curlCommand) return;
+        await navigator.clipboard.writeText(curlCommand);
+        setCurlCopied(true);
+        setTimeout(() => {
+            setCurlCopied(false);
+            setCurlCommand(null);
+        }, 1500);
+    };
+
+    // Generate PDFs using shared module
     const generatePDFs = async () => {
         if (!pdfTemplate || csvData.length === 0) {
             alert("Please upload both a PDF template and CSV file");
@@ -488,236 +525,58 @@ function App() {
         setProgress(0);
 
         try {
-            const templateArrayBuffer = await pdfTemplate.arrayBuffer();
-            const templateDoc = await PDFDocument.load(templateArrayBuffer);
-            const [templatePage] = await templateDoc.copyPages(templateDoc, [
-                0,
-            ]);
-            const { width: pageWidth, height: pageHeight } =
-                templatePage.getSize();
+            const templateBytes = await pdfTemplate.arrayBuffer();
+            const fontBytes = await resolveFontBytes();
+
             const previewWidth = previewRef.current?.clientWidth ?? 500;
             const previewHeight = previewRef.current?.clientHeight ?? 700;
 
-            console.log("pw: ", previewWidth, "ph: ", previewHeight);
+            // Convert pixel position to fraction + apply the padding/offset adjustments
+            // that were in the original code
+            const templateDoc = await PDFDocument.load(templateBytes);
+            const page = templateDoc.getPage(0);
+            const { width: pageWidth, height: pageHeight } = page.getSize();
 
-            const mergedDoc = await PDFDocument.create();
-            mergedDoc.registerFontkit(fontkit);
+            const positionX = (namePosition.x / previewWidth) * pageWidth + 5;
+            const positionY =
+                (namePosition.y / previewHeight) * pageHeight + 17;
 
-            let font;
-            if (fontFile) {
-                try {
-                    const fontBytes = await fontFile.arrayBuffer();
-                    font = await mergedDoc.embedFont(fontBytes, {
-                        subset: true,
-                    });
-                } catch (error) {
-                    console.error("Error embedding custom font:", error);
-                    // Use local default font instead of fetching from external URL
-                    const fontResponse = await fetch("/fonts/default-font.ttf");
-                    const fontBytes = await fontResponse.arrayBuffer();
-                    font = await mergedDoc.embedFont(fontBytes, {
-                        subset: true,
-                    });
-                }
-            } else {
-                // Use local default font
-                const fontResponse = await fetch("/fonts/default-font.ttf");
-                console.log("Font response: ", fontResponse);
-                const fontBytes = await fontResponse.arrayBuffer();
-                font = await mergedDoc.embedFont(fontBytes, { subset: true });
-            }
-
-            const scaledX = (namePosition.x / previewWidth) * pageWidth + 5;
-            // + 5 for the padding
-            const scaledY =
-                pageHeight - (namePosition.y / previewHeight) * pageHeight - 17;
-            // dont know why 17 but it works
-
-            let fullName = [
-                csvData[0].title,
-                csvData[0].firstName,
-                csvData[0].lastName,
-            ]
-                .filter(Boolean)
-                .join(" ");
-
-            // Calculate text width using the actual PDF font size
-            const textWidth = font.widthOfTextAtSize(fullName, pdfFontSize);
-
-            // Place the text according to alignment
-            const setXoriginal = scaledX + textWidth / 2;
-            console.log("scaled x,y: ", setXoriginal, scaledY);
+            const options = {
+                templateBytes: new Uint8Array(templateBytes),
+                persons: csvData,
+                fontBytes: new Uint8Array(fontBytes),
+                fontSize: pdfFontSize,
+                textColor,
+                textAlign: textPlacing[0] as "left" | "center",
+                positionX: positionX / pageWidth,
+                positionY: positionY / pageHeight,
+                outputFormat,
+                shouldFlatten,
+            };
 
             if (outputFormat === "single") {
-                // Generate single merged PDF
-                console.log(`Preparing ${csvData.length} pages (batch copy)...`);
-
-                // OPTIMIZATION: Copy all pages in one operation to share resources and reduce file size
-                const pageIndices = new Array(csvData.length).fill(0);
-                const pages = await mergedDoc.copyPages(templateDoc, pageIndices);
-
-                for (let i = 0; i < csvData.length; i++) {
-                    const person = csvData[i];
-                    console.log(`Processing winietka ${i + 1}/${csvData.length}: ${[person.title, person.firstName, person.lastName].filter(Boolean).join(" ")}`);
-
-                    // Add the pre-copied page
-                    const page = pages[i];
-                    mergedDoc.addPage(page);
-
-                    fullName = [person.title, person.firstName, person.lastName]
-                        .filter(Boolean)
-                        .join(" ");
-
-                    const currentTextWidth = font.widthOfTextAtSize(
-                        fullName,
-                        pdfFontSize
-                    );
-
-                    // Calculate scaled position from preview to PDF coordinates
-                    let setX;
-                    switch (textPlacing[0]) {
-                        case "left":
-                            setX = setXoriginal - textWidth / 2;
-                            break;
-                        case "center":
-                            setX = setXoriginal - currentTextWidth / 2;
-                            break;
-                        default:
-                            setX = setXoriginal - currentTextWidth / 2;
-                    }
-
-                    // Draw text with the actual PDF font size
-                    page.drawText(fullName, {
-                        x: setX,
-                        y: scaledY,
-                        size: pdfFontSize,
-                        font: font,
-                        color: hexToCmyk(textColor),
-                    });
-
-                    setProgress(Math.round(((i + 1) / csvData.length) * 100));
-                }
-
-                console.log("Finished generation loop. Serializing PDF (this may take a moment)...");
-                const pdfBytes = await mergedDoc.save();
-                console.log(`PDF serialized. Size: ${pdfBytes.byteLength} bytes. Creating Blob...`);
-                const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: "application/pdf" });
+                const pdfBytes = await generateSinglePdf(options, setProgress);
+                const blob = new Blob([pdfBytes.buffer as ArrayBuffer], {
+                    type: "application/pdf",
+                });
                 const url = URL.createObjectURL(blob);
-
                 const link = document.createElement("a");
                 link.href = url;
                 link.download = "winietki.pdf";
                 link.click();
-
                 URL.revokeObjectURL(url);
             } else {
-                // Generate multiple PDFs in a zip file
+                const pdfs = await generateMultiplePdfs(options, setProgress);
                 const zip = new JSZip();
-
-                for (let i = 0; i < csvData.length; i++) {
-                    const person = csvData[i];
-                    console.log(`Creating winietka ${i + 1}/${csvData.length}: ${[person.title, person.firstName, person.lastName].filter(Boolean).join(" ")}`);
-                    const singleDoc = await PDFDocument.create();
-                    singleDoc.registerFontkit(fontkit);
-
-                    // Embed the font in the single document
-                    let singleFont;
-                    if (fontFile) {
-                        try {
-                            const fontBytes = await fontFile.arrayBuffer();
-                            singleFont = await singleDoc.embedFont(fontBytes, {
-                                subset: true,
-                            });
-                        } catch (error) {
-                            console.error(
-                                "Error embedding custom font:",
-                                error
-                            );
-                            // Use local default font here too
-                            const fontResponse = await fetch(
-                                "/fonts/default-font.ttf"
-                            );
-                            const fontBytes = await fontResponse.arrayBuffer();
-                            singleFont = await singleDoc.embedFont(fontBytes, {
-                                subset: true,
-                            });
-                        }
-                    } else {
-                        // Use local default font
-                        const fontResponse = await fetch(
-                            "/fonts/default-font.ttf"
-                        );
-                        const fontBytes = await fontResponse.arrayBuffer();
-                        singleFont = await singleDoc.embedFont(fontBytes, {
-                            subset: true,
-                        });
-                    }
-
-                    // Copy template page
-                    const [page] = await singleDoc.copyPages(templateDoc, [0]);
-                    singleDoc.addPage(page);
-
-                    const fullName = [
-                        person.title,
-                        person.firstName,
-                        person.lastName,
-                    ]
-                        .filter(Boolean)
-                        .join(" ");
-
-                    // Calculate text width for this specific name
-                    const currentTextWidth = singleFont.widthOfTextAtSize(
-                        fullName,
-                        pdfFontSize
-                    );
-
-                    // Calculate scaled position from preview to PDF coordinates
-                    let setX;
-                    switch (textPlacing[0]) {
-                        case "left":
-                            setX = setXoriginal - textWidth / 2;
-                            break;
-                        case "center":
-                            setX = setXoriginal - currentTextWidth / 2;
-                            break;
-                        default:
-                            setX = setXoriginal - currentTextWidth / 2;
-                    }
-
-                    // Draw text with the actual PDF font size
-                    page.drawText(fullName, {
-                        x: setX,
-                        y: scaledY,
-                        size: pdfFontSize,
-                        font: singleFont, // Use the font embedded in this document
-                        color: hexToCmyk(textColor),
-                    });
-
-                    // Save the single PDF
-                    const pdfBytes = await singleDoc.save();
-
-                    // Create filename without special characters
-                    const fileName =
-                        `${person.firstName}_${person.lastName}.pdf`.replace(
-                            /\s+/g,
-                            "_"
-                        );
-
-                    // Add to zip
-                    zip.file(fileName, pdfBytes);
-
-                    setProgress(Math.round(((i + 1) / csvData.length) * 100));
+                for (const [fileName, bytes] of pdfs) {
+                    zip.file(fileName, bytes);
                 }
-
-                // Generate and download zip file
                 const zipBlob = await zip.generateAsync({ type: "blob" });
                 const url = URL.createObjectURL(zipBlob);
-
                 const link = document.createElement("a");
                 link.href = url;
                 link.download = "winietki.zip";
                 link.click();
-
                 URL.revokeObjectURL(url);
             }
         } catch (error) {
@@ -746,11 +605,26 @@ function App() {
 
                         <div>
                             <label
-                                className={`upload-button ${pdfTemplate ? "has-file" : ""
-                                    }`}
-                                htmlFor="pdfUpload">
+                                className={`upload-button ${pdfTemplate ? "has-file" : ""} ${isPdfDragActive ? "drag-active" : ""}${globalDragType && globalDragType !== "pdf" ? " drag-disabled" : ""}`}
+                                htmlFor="pdfUpload"
+                                onDragEnter={(e) =>
+                                    handleDrag(e, setIsPdfDragActive, "pdf")
+                                }
+                                onDragLeave={(e) =>
+                                    handleDrag(e, setIsPdfDragActive, "pdf")
+                                }
+                                onDragOver={(e) =>
+                                    handleDrag(e, setIsPdfDragActive, "pdf")
+                                }
+                                onDrop={(e) =>
+                                    handleDrop(e, setIsPdfDragActive, "pdf")
+                                }>
                                 <span>
-                                    {pdfTemplate ? pdfTemplate.name : "Dodaj"}
+                                    {isPdfDragActive
+                                        ? "Upuść tutaj"
+                                        : pdfTemplate
+                                          ? pdfTemplate.name
+                                          : "Dodaj"}
                                 </span>
                                 <input
                                     id="pdfUpload"
@@ -777,13 +651,26 @@ function App() {
                         </div>
                         <div>
                             <label
-                                className={`upload-button ${csvData.length > 0 ? "has-file" : ""
-                                    }`}
-                                htmlFor="csvUpload">
+                                className={`upload-button ${csvData.length > 0 ? "has-file" : ""} ${isCsvDragActive ? "drag-active" : ""}${globalDragType && globalDragType !== "csv" ? " drag-disabled" : ""}`}
+                                htmlFor="csvUpload"
+                                onDragEnter={(e) =>
+                                    handleDrag(e, setIsCsvDragActive, "csv")
+                                }
+                                onDragLeave={(e) =>
+                                    handleDrag(e, setIsCsvDragActive, "csv")
+                                }
+                                onDragOver={(e) =>
+                                    handleDrag(e, setIsCsvDragActive, "csv")
+                                }
+                                onDrop={(e) =>
+                                    handleDrop(e, setIsCsvDragActive, "csv")
+                                }>
                                 <span>
-                                    {csvData.length > 0
-                                        ? `Załadowano ${csvData.length} wierszy`
-                                        : "Dodaj"}
+                                    {isCsvDragActive
+                                        ? "Upuść tutaj"
+                                        : csvData.length > 0
+                                          ? `Załadowano ${csvData.length} wierszy`
+                                          : "Dodaj"}
                                 </span>
                                 <input
                                     id="csvUpload"
@@ -880,12 +767,59 @@ function App() {
                         <div className="settings-grid">
                             <div className="setting-item">
                                 <label>Czcionka</label>
+                                <select
+                                    value={selectedFont}
+                                    onChange={(e) =>
+                                        setSelectedFont(e.target.value)
+                                    }
+                                    disabled={isGenerating}
+                                    style={{ marginBottom: "10px" }}>
+                                    {AVAILABLE_FONTS.map((font) => (
+                                        <option
+                                            key={font.name}
+                                            value={font.name}>
+                                            {font.name}
+                                        </option>
+                                    ))}
+                                    <option value="Custom">
+                                        Własna (.ttf)
+                                    </option>
+                                </select>
+
                                 <label
-                                    className={`upload-button ${fontFile ? "has-file" : ""
-                                        }`}
-                                    htmlFor="fontUpload">
+                                    className={`upload-button ${fontFile ? "has-font-file" : ""} ${isDragActive ? "drag-active" : ""}${globalDragType && globalDragType !== "font" ? " drag-disabled" : ""}`}
+                                    htmlFor="fontUpload"
+                                    title="Prześlij plik, aby przełączyć na czcionkę własną"
+                                    onDragEnter={(e) =>
+                                        handleDrag(e, setIsDragActive, "font")
+                                    }
+                                    onDragLeave={(e) =>
+                                        handleDrag(e, setIsDragActive, "font")
+                                    }
+                                    onDragOver={(e) =>
+                                        handleDrag(e, setIsDragActive, "font")
+                                    }
+                                    onDrop={(e) =>
+                                        handleDrop(e, setIsDragActive, "font")
+                                    }
+                                    style={{
+                                        opacity:
+                                            (selectedFont === "Custom" ||
+                                                isDragActive) &&
+                                            !(
+                                                globalDragType &&
+                                                globalDragType !== "font"
+                                            )
+                                                ? 1
+                                                : 0.6,
+                                        transition: "all 0.2s ease",
+                                    }}>
                                     <span>
-                                        {fontFile ? fontFile.name : "Dodaj"}
+                                        {isDragActive
+                                            ? "Upuść tutaj"
+                                            : fontFile
+                                              ? fontFile.name
+                                              : "Prześlij/Upuść .ttf"}
                                     </span>
                                     <input
                                         id="fontUpload"
@@ -909,13 +843,23 @@ function App() {
                             </div>
                             <div className="setting-item">
                                 <label>Kolor tekstu</label>
-                                <div style={{ display: "flex", gap: "10px", alignItems: "center", width: "100%" }}>
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        gap: "10px",
+                                        alignItems: "center",
+                                        width: "100%",
+                                    }}>
                                     <input
                                         type="color"
                                         value={textColor}
                                         onChange={handleTextColor}
                                         disabled={isGenerating}
-                                        style={{ flex: 1, height: "40px", cursor: "pointer" }}
+                                        style={{
+                                            flex: 1,
+                                            height: "40px",
+                                            cursor: "pointer",
+                                        }}
                                     />
                                     <input
                                         type="text"
@@ -930,7 +874,9 @@ function App() {
                                             borderRadius: "4px",
                                             border: "1px solid #ccc",
                                             textTransform: "uppercase",
-                                            textAlign: "center"
+                                            textAlign: "center",
+                                            backgroundColor: "#ffffff",
+                                            color: "#000000",
                                         }}
                                         maxLength={7}
                                     />
@@ -968,6 +914,42 @@ function App() {
                                     </option>
                                 </select>
                             </div>
+                            <div className="setting-item">
+                                <label>Opcje dodatkowe</label>
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "10px",
+                                        marginTop: "5px",
+                                    }}>
+                                    <input
+                                        type="checkbox"
+                                        id="flattenPdf"
+                                        checked={shouldFlatten}
+                                        onChange={(e) =>
+                                            setShouldFlatten(e.target.checked)
+                                        }
+                                        disabled={isGenerating}
+                                        style={{
+                                            width: "20px",
+                                            height: "20px",
+                                            accentColor: "#4f46e5",
+                                            backgroundColor: "#ffffff",
+                                        }}
+                                    />
+                                    <label
+                                        htmlFor="flattenPdf"
+                                        style={{
+                                            margin: 0,
+                                            fontWeight: "normal",
+                                            fontSize: "0.9em",
+                                        }}>
+                                        Spłaszcz PDF (Wymagane przez niektóre
+                                        drukarnie)
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -991,14 +973,13 @@ function App() {
                             />
                             {csvData.length > 0 && (
                                 <div
-                                    className={`name-preview ${isDragging ? "dragging" : ""
-                                        }`}
+                                    className={`name-preview ${
+                                        isDragging ? "dragging" : ""
+                                    }`}
                                     style={{
                                         left: namePosition.x,
                                         top: namePosition.y,
-                                        fontFamily: customFontLoaded
-                                            ? customFontFamily
-                                            : "inherit",
+                                        fontFamily: activeFontFamily,
                                         fontSize: `${fontScale}px`,
                                         color: textColor,
                                     }}>
@@ -1023,6 +1004,13 @@ function App() {
                                 }>
                                 {isGenerating ? "Generowanie..." : "Generuj"}
                             </button>
+                            <button
+                                className="secondary-button"
+                                onClick={showCurlCommand}
+                                disabled={!pdfTemplate || isGenerating}
+                                title="Skopiuj komendę curl z aktualnymi ustawieniami">
+                                Kopiuj curl
+                            </button>
                         </div>
 
                         {isGenerating && (
@@ -1036,6 +1024,73 @@ function App() {
                     </div>
                 )}
             </div>
+
+            {curlCommand && (
+                <div
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        background: "rgba(0,0,0,0.5)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        zIndex: 9999,
+                    }}
+                    onClick={() => setCurlCommand(null)}>
+                    <div
+                        style={{
+                            background: "white",
+                            borderRadius: "1rem",
+                            padding: "1.5rem",
+                            maxWidth: "700px",
+                            width: "90%",
+                            maxHeight: "80vh",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "1rem",
+                            boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+                        }}
+                        onClick={(e) => e.stopPropagation()}>
+                        <h3 style={{ margin: 0, textAlign: "left" }}>
+                            Komenda curl
+                        </h3>
+                        <pre
+                            style={{
+                                background: "#1e1e1e",
+                                color: "#d4d4d4",
+                                padding: "1rem",
+                                borderRadius: "0.5rem",
+                                overflow: "auto",
+                                fontSize: "0.85rem",
+                                textAlign: "left",
+                                whiteSpace: "pre-wrap",
+                                wordBreak: "break-all",
+                                margin: 0,
+                            }}>
+                            {curlCommand}
+                        </pre>
+                        <div
+                            style={{
+                                display: "flex",
+                                gap: "0.5rem",
+                                justifyContent: "flex-end",
+                            }}>
+                            <button
+                                className="secondary-button"
+                                onClick={() => setCurlCommand(null)}>
+                                Zamknij
+                            </button>
+                            <button
+                                className="primary-button"
+                                onClick={confirmCopyCurl}>
+                                {curlCopied
+                                    ? "Skopiowano!"
+                                    : "Kopiuj do schowka"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

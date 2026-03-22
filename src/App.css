@@ -130,9 +130,7 @@ body {
 }
 
 /* Hide the icon when the span contains text other than "Dodaj" */
-.upload-button
-    span:not(:empty):not(:contains("Dodaj"))
-    + .upload-button::before {
+.upload-button span:not(:empty):not(:contains("Dodaj"))+.upload-button::before {
     display: none;
 }
 
@@ -152,6 +150,32 @@ body {
 .upload-button:hover {
     border-color: var(--primary-color);
     background: rgba(88, 66, 255, 0.05);
+}
+
+/* Drag active state - file is hovering over correct zone */
+.upload-button.drag-active {
+    border-color: var(--success-color);
+    border-style: solid;
+    background: rgba(64, 193, 109, 0.15);
+    transform: scale(1.02);
+}
+
+.upload-button.drag-active span {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+/* Drag disabled state - file type doesn't match this zone */
+.upload-button.drag-disabled {
+    opacity: 0.4;
+    filter: grayscale(50%);
+    pointer-events: none;
+    border-color: #ccc;
+    background: #f0f0f0;
+}
+
+.upload-button.drag-disabled span {
+    color: #999;
 }
 
 .upload-button input[type="file"] {
