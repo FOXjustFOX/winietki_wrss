@@ -185,6 +185,7 @@ function App() {
     const [dryRun, setDryRun] = useState<boolean>(true);
     const [isSending, setIsSending] = useState<boolean>(false);
     const [sendResult, setSendResult] = useState<string | null>(null);
+    const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
 
     // Handle PDF template upload
     const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -415,6 +416,13 @@ function App() {
     const handleTextPlacing = (e: React.ChangeEvent<HTMLSelectElement>) => {
         setTextPlacing([e.target.value]);
     };
+
+    // Check if the mail server is reachable
+    useEffect(() => {
+        fetch("/api/health")
+            .then((r) => setServerAvailable(r.ok))
+            .catch(() => setServerAvailable(false));
+    }, []);
 
     // Calculate preview scale when PDF is loaded
     useEffect(() => {
@@ -1265,21 +1273,31 @@ function App() {
                                 }>
                                 {isGenerating ? "Generowanie..." : "Generuj"}
                             </button>
-                            <button
-                                className="secondary-button"
-                                onClick={handleSendEmails}
-                                disabled={
-                                    !pdfTemplate ||
-                                    recipientsWithEmail === 0 ||
-                                    isGenerating ||
-                                    isSending
-                                }>
-                                {isSending
-                                    ? "Wysyłanie..."
-                                    : dryRun
-                                        ? "Wyślij (dry-run)"
-                                        : "Wyślij e-maile"}
-                            </button>
+                            <span
+                                title={
+                                    serverAvailable === false
+                                        ? "Serwer e-mail jest niedostępny. Skontaktuj się z administratorem, aby uruchomić serwer."
+                                        : undefined
+                                }
+                                style={{ display: "inline-block", cursor: serverAvailable === false ? "not-allowed" : undefined }}>
+                                <button
+                                    className="secondary-button"
+                                    onClick={handleSendEmails}
+                                    disabled={
+                                        serverAvailable !== true ||
+                                        !pdfTemplate ||
+                                        recipientsWithEmail === 0 ||
+                                        isGenerating ||
+                                        isSending
+                                    }
+                                    style={serverAvailable === false ? { pointerEvents: "none", opacity: 0.45 } : undefined}>
+                                    {isSending
+                                        ? "Wysyłanie..."
+                                        : dryRun
+                                            ? "Wyślij (dry-run)"
+                                            : "Wyślij e-maile"}
+                                </button>
+                            </span>
                         </div>
 
                         {isGenerating && (

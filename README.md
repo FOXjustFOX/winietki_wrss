@@ -88,6 +88,33 @@ Use these in the subject and message body:
 #### Dry-run mode
 Check **Test mode (no sending)** to simulate the send without actually delivering any emails. Use this to verify your setup before a real send.
 
+## Running with Docker
+
+### Build and start the container
+
+```bash
+docker build -t winietki .
+docker run -d --name winietki -p 80:80 -p 4000:4000 winietki
+```
+
+Open [http://localhost](http://localhost) in your browser.
+
+The container serves the frontend by default. The **Send emails** button is greyed out until the mail server is running.
+
+### Starting the mail server (when email is needed)
+
+Exec into the running container and start the server:
+
+```bash
+docker exec -it winietki npm run server
+```
+
+The mail server will listen on port `4000`. Keep the terminal open — closing it stops the server. To run it in the background:
+
+```bash
+docker exec -d winietki node server.mjs
+```
+
 ## Project Structure
 
 ```
@@ -102,6 +129,7 @@ winietki/
 │   ├── App.css                  # styles
 │   └── main.tsx                 # entry point
 ├── server.mjs                   # Express backend (email sending)
+├── Dockerfile                   # Docker image (Node.js, frontend + server)
 ├── vite.config.ts               # Vite config with /api proxy
 └── package.json
 ```

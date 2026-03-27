@@ -2,27 +2,32 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-# Copy package files
 COPY package*.json ./
 RUN npm install
 
-# Copy all source code
 COPY . .
-
-# Build the production bundle (Vite will output to /app/dist)
 RUN npm run build
 
 # (2) Production Stage
-FROM nginx:alpine
+FROM node:20-alpine
+WORKDIR /app
 
-# Remove default static files
-RUN rm -rf /usr/share/nginx/html/*
+# Static file server for the frontend
+RUN npm install -g serve
 
-# Copy the built files from the first stage
-COPY --from=build /app/dist /usr/share/nginx/html
+# Install production dependencies (needed by server.mjs)
+COPY package*.json ./
+RUN npm install --omit=dev
 
-# Expose port 80 only
-EXPOSE 80
+# Copy built frontend
+COPY --from=build /app/dist ./dist
 
-# Use the default Nginx start command
-CMD ["nginx", "-g", "daemon off;"]
+# Copy server and required assets
+COPY server.mjs ./
+COPY public/fonts ./public/fonts
+
+# Port 80 = frontend, port 4000 = mail server (started manually)
+EXPOSE 80 4000
+
+# Default: serve the frontend only
+CMD ["serve", "dist", "-l", "80"]
