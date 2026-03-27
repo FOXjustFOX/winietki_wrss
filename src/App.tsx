@@ -2,22 +2,21 @@ import { useState, useRef, useEffect } from "react";
 import Papa from "papaparse";
 import { getDocument } from "pdfjs-dist";
 import "./App.css";
-import { PDFDocument, cmyk } from "pdf-lib";
+import { PDFDocument, cmyk, PDFFont, StandardFonts } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import * as pdfjs from "pdfjs-dist";
+import pdfWorkerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import JSZip from "jszip";
 
 // Configure PDF.js worker (prefer local asset to avoid CDN/CORS issues)
 const setPdfWorker = () => {
-    // Use local worker shipped in public/assets; fall back to CDN only if missing
-    pdfjs.GlobalWorkerOptions.workerSrc = `/assets/pdf.worker.min.mjs`;
+    // Prefer bundler-provided worker to avoid missing wasm warnings; keep CDN as fallback
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc || `/assets/pdf.worker.min.mjs`;
 
-    // Fallback hook: if local fails to load at runtime, callers can override to CDN
     if (typeof window !== "undefined") {
         window.addEventListener("error", (event) => {
             const target = event?.target as HTMLScriptElement | undefined;
             if (target?.src?.includes("pdf.worker") && target instanceof HTMLScriptElement) {
-                // Attempt CDN as last resort
                 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.0.375/pdf.worker.min.mjs`;
             }
         });
@@ -82,6 +81,8 @@ const emailVariants = [
     "adres_email",
 ];
 
+const GLOBAL_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // Function to find which column matches a specific field
 const findMatchingColumn = (
     headers: string[],
@@ -140,10 +141,11 @@ function App() {
     const [csvData, setCsvData] = useState<Person[]>([]);
     const [fontFile, setFontFile] = useState<File | null>(null);
     const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
-    const [customFontFamily, setCustomFontFamily] = useState<string>("inherit");
+    const [customFontFamily, setCustomFontFamily] = useState<string>("'DefaultPDF'");
     const [customFontLoaded, setCustomFontLoaded] = useState<boolean>(false);
     const [fontScale, setFontScale] = useState<number>(12);
     const [textColor, setTextColor] = useState<string>("#000000");
+    const [colorError, setColorError] = useState<string | null>(null);
     const [textPlacing, setTextPlacing] = useState<string[]>(["center"]);
     const [previewScale, setPreviewScale] = useState<number>(1);
 
@@ -155,7 +157,7 @@ function App() {
     const [pdfFontSize, setPdfFontSize] = useState<number>(12);
 
     // Preview refs
-    const previewRef = useRef<HTMLDivElement>(null);
+    const previewContainerRef = useRef<HTMLDivElement>(null);
     const imgRef = useRef<HTMLImageElement>(null);
 
     // Add new state for output format
@@ -165,6 +167,7 @@ function App() {
 
     // Help state
     const [showCsvHelp, setShowCsvHelp] = useState<boolean>(false);
+    const [showEmailHelp, setShowEmailHelp] = useState<boolean>(false);
 
     // Mail sending states
     const [smtpHost, setSmtpHost] = useState<string>("smtp.gmail.com");
@@ -254,11 +257,9 @@ function App() {
                         useDefaultPositions
                     );
 
-                    const persons: Person[] = (results.data as CSVRow[])
+                            const persons: Person[] = (results.data as CSVRow[])
                         .filter((row) => {
-                            // For default positions
                             if (useDefaultPositions) {
-                                // Get first three columns values, regardless of their names
                                 const columns = Object.values(row);
                                 return (
                                     columns.length > 0 &&
@@ -267,7 +268,6 @@ function App() {
                                 );
                             }
 
-                            // For named columns
                             return (
                                 (firstNameCol &&
                                     typeof row[firstNameCol] === "string" &&
@@ -279,29 +279,24 @@ function App() {
                         })
                         .map((row) => {
                             if (useDefaultPositions) {
-                                // Get the first three columns as firstName, lastName, title
                                 const columns = Object.values(row);
 
-                                return {
-                                firstName: (typeof columns[0] === "string"
-                                    ? columns[0]
-                                    : ""
-                                ).trim(),
-                                lastName: (columns.length > 1 &&
-                                    typeof columns[1] === "string"
-                                    ? columns[1]
-                                    : ""
-                                ).trim(),
-                                email: (columns.length > 2 &&
-                                    typeof columns[2] === "string"
-                                    ? columns[2]
-                                    : ""
-                                ).trim(),
-                                title: "",
-                            };
+                                const firstName = (typeof columns[0] === "string" ? columns[0] : "").trim();
+                                const lastName = (columns.length > 1 && typeof columns[1] === "string" ? columns[1] : "").trim();
+                                let title = (columns.length > 2 && typeof columns[2] === "string" ? columns[2] : "").trim();
+
+                                let email = "";
+                                if (columns.length > 3 && typeof columns[3] === "string") {
+                                    email = columns[3].trim();
+                                } else if (columns.length > 2 && typeof columns[2] === "string" && GLOBAL_EMAIL_REGEX.test(columns[2])) {
+                                    // Backward-compat: 3 kolumny gdzie 3. to e-mail
+                                    email = columns[2].trim();
+                                    title = "";
+                                }
+
+                                return { firstName, lastName, title, email };
                             }
 
-                            // For named columns
                             return {
                                 firstName:
                                     firstNameCol &&
@@ -313,9 +308,9 @@ function App() {
                                         typeof row[lastNameCol] === "string"
                                         ? row[lastNameCol]!.trim()
                                         : "",
-                                    email: emailCol
-                                        ? (row[emailCol] || "").trim()
-                                        : "",
+                                email: emailCol
+                                    ? (row[emailCol] || "").trim()
+                                    : "",
                                 title: titleCol
                                     ? (row[titleCol] || "").trim()
                                     : "",
@@ -328,6 +323,11 @@ function App() {
                         );
 
                     console.log("Final persons array:", persons);
+                    if (persons.length === 0) {
+                        alert("Plik CSV jest pusty lub nie zawiera imion/nazwisk do wygenerowania.");
+                        setCsvData([]);
+                        return;
+                    }
                     setCsvData(persons);
                 },
                 error: (error) => {
@@ -390,8 +390,8 @@ function App() {
 
     // Mouse handlers for positioning
     const handleMouseDown = (e: React.MouseEvent) => {
-        if (previewRef.current) {
-            const rect = previewRef.current.getBoundingClientRect();
+        if (previewContainerRef.current) {
+            const rect = previewContainerRef.current.getBoundingClientRect();
             const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
             const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
             setNamePosition({ x, y });
@@ -400,8 +400,8 @@ function App() {
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
-        if (isDragging && previewRef.current) {
-            const rect = previewRef.current.getBoundingClientRect();
+        if (isDragging && previewContainerRef.current) {
+            const rect = previewContainerRef.current.getBoundingClientRect();
             const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
             const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
             setNamePosition({ x, y });
@@ -418,7 +418,7 @@ function App() {
 
     // Calculate preview scale when PDF is loaded
     useEffect(() => {
-        if (pdfPreviewUrl && previewRef.current) {
+        if (pdfPreviewUrl && previewContainerRef.current) {
             const calculateScale = async () => {
                 try {
                     if (!pdfTemplate) return;
@@ -428,7 +428,7 @@ function App() {
                     const { width: pdfWidth } = page.getSize();
 
                     // Get preview width
-                    const previewWidth = imgRef.current?.clientWidth || previewRef.current?.clientWidth || 500;
+                    const previewWidth = imgRef.current?.clientWidth || previewContainerRef.current?.clientWidth || 500;
 
                     // Calculate scale factor
                     const scale = previewWidth / pdfWidth;
@@ -456,12 +456,20 @@ function App() {
 
     // Font size
     const handleTextColor = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setTextColor(e.target.value);
+        const value = e.target.value.trim();
+        const hexRegex = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+        if (hexRegex.test(value)) {
+            setTextColor(value.toUpperCase());
+            setColorError(null);
+        } else {
+            setColorError("Nieprawidłowy kolor. Użyj #RGB lub #RRGGBB.");
+        }
     };
 
     // Recalculate scale when PDF or preview changes (not when font size changes)
     useEffect(() => {
-        if (pdfTemplate && previewRef.current) {
+        if (pdfTemplate && previewContainerRef.current) {
             const calculateFontScale = async () => {
                 try {
                     const arrayBuffer = await pdfTemplate.arrayBuffer();
@@ -469,7 +477,7 @@ function App() {
                     const page = pdfDoc.getPage(0);
                     const { width: pdfWidth } = page.getSize();
 
-                    const previewWidth = imgRef.current?.clientWidth || previewRef.current?.clientWidth || 500;
+                    const previewWidth = imgRef.current?.clientWidth || previewContainerRef.current?.clientWidth || 500;
                     const scaleFactor = previewWidth / pdfWidth;
                     setPreviewScale(scaleFactor);
                 } catch (error) {
@@ -521,34 +529,46 @@ function App() {
             const { width: pageWidth, height: pageHeight } =
                 templatePage.getSize();
 
-            const previewWidth = imgRef.current?.clientWidth ?? previewRef.current?.clientWidth ?? 500;
-            const previewHeight = imgRef.current?.clientHeight ?? previewRef.current?.clientHeight ?? 700;
-
-            console.log("pw: ", previewWidth, "ph: ", previewHeight);
+            // Użycie getBoundingClientRect dla uniknięcia błędów zaokrągleń pikseli
+            const previewRect = imgRef.current?.getBoundingClientRect();
+            if (!previewRect) throw new Error("Preview image not found");
+            const previewWidth = previewRect.width;
+            const previewHeight = previewRect.height;
 
             const mergedDoc = await PDFDocument.create();
             mergedDoc.registerFontkit(fontkit);
 
-            let font;
+            let font: PDFFont;
+            let cachedFontBytes: ArrayBuffer | null = null; // Inicjalizacja naprawia TS2454
+
             if (fontFile) {
                 try {
-                    const fontBytes = await fontFile.arrayBuffer();
-                    font = await mergedDoc.embedFont(fontBytes, { subset: true });
-                } catch (error) {
-                    console.error("Error embedding custom font, falling back to default:", error);
+                    cachedFontBytes = await fontFile.arrayBuffer();
+                    font = await mergedDoc.embedFont(cachedFontBytes, { subset: true });
+                } catch { // Usunięcie zmiennej naprawia błąd ESLint (_e is defined but never used)
+                    console.error("Error embedding custom font, falling back to default.");
                     const fontResponse = await fetch("/fonts/default-font.ttf");
-                    const fontBytes = await fontResponse.arrayBuffer();
-                    font = await mergedDoc.embedFont(fontBytes, { subset: true });
+                    cachedFontBytes = await fontResponse.arrayBuffer();
+                    font = await mergedDoc.embedFont(cachedFontBytes, { subset: true });
                 }
             } else {
-                const fontResponse = await fetch("/fonts/default-font.ttf");
-                const fontBytes = await fontResponse.arrayBuffer();
-                font = await mergedDoc.embedFont(fontBytes, { subset: true });
+                try {
+                    const fontResponse = await fetch("/fonts/default-font.ttf");
+                    if (!fontResponse.ok) throw new Error("Default font not found");
+                    cachedFontBytes = await fontResponse.arrayBuffer();
+                    font = await mergedDoc.embedFont(cachedFontBytes, { subset: true });
+                } catch {
+                    console.warn("Using Standard Helvetica font as fallback");
+                    font = await mergedDoc.embedStandardFont(StandardFonts.Helvetica);
+                }
             }
 
-            const scaledX = (namePosition.x / previewWidth) * pageWidth;
-            const scaledY =
-                pageHeight - (namePosition.y / previewHeight) * pageHeight;
+            // OSTATECZNA MATEMATYKA POZYCJONOWANIA
+            const paddingPDF_Y = (5 / previewHeight) * pageHeight;
+            const paddingPDF_X = (9 / previewWidth) * pageWidth;
+
+            // Sztywny ułamek 0.87 (idealny środek między za wysokim 0.84 a za niskim 0.94)
+            const fontBaselineOffset = pdfFontSize * 0.80;
 
             if (outputFormat === "single") {
                 // Generate single merged PDF
@@ -566,11 +586,7 @@ function App() {
                     const page = pages[i];
                     mergedDoc.addPage(page);
 
-                    const fullName = [
-                        person.title,
-                        person.firstName,
-                        person.lastName,
-                    ]
+                    const fullName = [person.title, person.firstName, person.lastName]
                         .filter(Boolean)
                         .join(" ");
 
@@ -579,23 +595,20 @@ function App() {
                         pdfFontSize
                     );
 
+                    const baseScaledX = (namePosition.x / previewWidth) * pageWidth;
+
                     let setX;
-                    switch (textPlacing[0]) {
-                        case "left":
-                            setX = scaledX;
-                            break;
-                        case "right":
-                            setX = scaledX - currentTextWidth;
-                            break;
-                        case "center":
-                        default:
-                            setX = scaledX - currentTextWidth / 2;
+                    if (textPlacing[0] === "center") {
+                        setX = baseScaledX - currentTextWidth / 2;
+                    } else {
+                        setX = baseScaledX + paddingPDF_X;
                     }
 
-                    // Draw text with the actual PDF font size
+                    const setY = pageHeight - (namePosition.y / previewHeight) * pageHeight - paddingPDF_Y - fontBaselineOffset;
+
                     page.drawText(fullName, {
                         x: setX,
-                        y: scaledY,
+                        y: setY,
                         size: pdfFontSize,
                         font: font,
                         color: hexToCmyk(textColor),
@@ -626,22 +639,9 @@ function App() {
                     const singleDoc = await PDFDocument.create();
                     singleDoc.registerFontkit(fontkit);
 
-                    let singleFont;
-                    if (fontFile) {
-                        try {
-                            const fontBytes = await fontFile.arrayBuffer();
-                            singleFont = await singleDoc.embedFont(fontBytes, { subset: true });
-                        } catch (error) {
-                            console.error("Error embedding custom font, falling back to default:", error);
-                            const fontResponse = await fetch("/fonts/default-font.ttf");
-                            const fontBytes = await fontResponse.arrayBuffer();
-                            singleFont = await singleDoc.embedFont(fontBytes, { subset: true });
-                        }
-                    } else {
-                        const fontResponse = await fetch("/fonts/default-font.ttf");
-                        const fontBytes = await fontResponse.arrayBuffer();
-                        singleFont = await singleDoc.embedFont(fontBytes, { subset: true });
-                    }
+                    // Wykorzystujemy zbuforowaną czcionkę
+                    if (!cachedFontBytes) throw new Error("Błąd ładowania czcionki");
+                    const singleFont = await singleDoc.embedFont(cachedFontBytes, { subset: true });
 
                     // Copy template page
                     const [page] = await singleDoc.copyPages(templateDoc, [0]);
@@ -662,24 +662,19 @@ function App() {
                     );
 
                     let setX;
-                    switch (textPlacing[0]) {
-                        case "left":
-                            setX = scaledX;
-                            break;
-                        case "right":
-                            setX = scaledX - currentTextWidth;
-                            break;
-                        case "center":
-                        default:
-                            setX = scaledX - currentTextWidth / 2;
+                    if (textPlacing[0] === "center") {
+                        setX = (namePosition.x / previewWidth) * pageWidth - currentTextWidth / 2;
+                    } else {
+                        setX = (namePosition.x / previewWidth) * pageWidth + paddingPDF_X;
                     }
 
-                    // Draw text with the actual PDF font size
+                    const setY = pageHeight - (namePosition.y / previewHeight) * pageHeight - paddingPDF_Y - fontBaselineOffset;
+
                     page.drawText(fullName, {
                         x: setX,
-                        y: scaledY,
+                        y: setY,
                         size: pdfFontSize,
-                        font: singleFont, // Use the font embedded in this document
+                        font: singleFont,
                         color: hexToCmyk(textColor),
                     });
 
@@ -732,13 +727,26 @@ function App() {
             return;
         }
 
-        if (!previewRef.current) {
+        if (!previewContainerRef.current) {
             alert("Podgląd nie jest gotowy. Wgraj szablon PDF");
             return;
         }
 
-        const previewWidth = imgRef.current?.clientWidth || previewRef.current?.clientWidth || 500;
-        const previewHeight = imgRef.current?.clientHeight || previewRef.current?.clientHeight || 700;
+        // Walidacja wymaganych pól SMTP przed wysyłką
+        const missingSmtp: string[] = [];
+        if (!smtpHost.trim()) missingSmtp.push("SMTP host");
+        if (!smtpPort || smtpPort <= 0) missingSmtp.push("SMTP port");
+        if (!smtpUser.trim()) missingSmtp.push("Login (user)");
+        if (!smtpPass.trim()) missingSmtp.push("Hasło");
+        if (!smtpFrom.trim()) missingSmtp.push("From");
+
+        if (missingSmtp.length > 0) {
+            alert(`Uzupełnij wymagane pola SMTP przed wysyłką:\n- ${missingSmtp.join("\n- ")}`);
+            return;
+        }
+
+        const previewWidth = imgRef.current?.clientWidth || previewContainerRef.current?.clientWidth || 500;
+        const previewHeight = imgRef.current?.clientHeight || previewContainerRef.current?.clientHeight || 700;
 
         setIsSending(true);
         setSendResult(null);
@@ -805,7 +813,7 @@ function App() {
     return (
         <div className="app-container">
             <div className="header">
-                <div className="greeting">Cześć</div>
+                <div className="greeting">WITaj</div>
                 <h1>Uzupełnij swoje grafiki szybko i prosto!</h1>
             </div>
 
@@ -896,16 +904,21 @@ function App() {
                                                 {lastNameVariants.join(", ")}
                                             </li>
                                             <li>
+                                                <strong> Tytuł (opcjonalny):</strong>{" "}
+                                                {titleVariants.join(", ")}
+                                            </li>
+                                            <li>
                                                 <strong>E-mail:</strong>{" "}
                                                 {emailVariants.join(", ")}
                                             </li>
                                         </ul>
                                         <p>
                                             Jeśli nagłówki nie zostaną
-                                            rozpoznane, system użyje pierwszej,
-                                            drugiej i trzeciej kolumny jako
-                                            odpowiednio: imię, nazwisko i
-                                            e-mail.
+                                            rozpoznane, system użyje pierwszych
+                                            czterech kolumn w kolejności: imię,
+                                            nazwisko, tytuł, e-mail. Gdy plik ma
+                                            tylko 3 kolumny, trzecia kolumna jest
+                                            traktowana jako e-mail (bez tytułu).
                                         </p>
                                         <p>
                                             <strong>Uwaga:</strong> kolumna
@@ -923,13 +936,15 @@ function App() {
                                                 <tr>
                                                     <th>Imię</th>
                                                     <th>Nazwisko</th>
-                                                    <th>E-mail</th>
+                                                        <th>Tytuł</th>
+                                                        <th>E-mail</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 <tr>
                                                     <td>Jan</td>
                                                     <td>Kowalski</td>
+                                                    <td>mgr</td>
                                                     <td>
                                                         jan.kowalski@example.com
                                                     </td>
@@ -937,16 +952,15 @@ function App() {
                                                 <tr>
                                                     <td>Anna</td>
                                                     <td>Nowak</td>
-                                                    <td>
-                                                        anna.nowak@example.com
+                                                    <td>dr
                                                     </td>
+                                                    <td>anna.nowak@example.com</td>
                                                 </tr>
                                                 <tr>
                                                     <td>Piotr</td>
                                                     <td>Wiśniewski</td>
-                                                    <td>
-                                                        piotr.w@example.com
-                                                    </td>
+                                                    <td>prof.</td>
+                                                    <td>piotr.w@example.com</td>
                                                 </tr>
                                             </tbody>
                                         </table>
@@ -1020,6 +1034,9 @@ function App() {
                                         maxLength={7}
                                     />
                                 </div>
+                                {colorError && (
+                                    <small style={{ color: "#d14343" }}>{colorError}</small>
+                                )}
                             </div>
                         </div>
                         {fontFile && <div className="step-check">✓</div>}
@@ -1056,33 +1073,41 @@ function App() {
                         </div>
                     </div>
 
-                    <div className="step-card">
-
+                    <div className="step-card" style={{ gridColumn: "1 / -1" }}>
                         <h2>Krok 5:</h2>
                         <p>Wysyłka certyfikatów e-mail</p>
-                        <div className="info-box">
-                            <strong>Jak wysłać e-maile?</strong><br /><br />
-                            Aby wysłać certyfikaty, potrzebujesz danych swojego serwera pocztowego (SMTP).<br /><br />
+                        <div className="format-info" style={{ position: "relative", display: "inline-block" }}>
+                            Instrukcja wysyłki
+                            <span
+                                className="help-icon"
+                                onClick={() => setShowEmailHelp((prev) => !prev)}
+                                onMouseEnter={() => setShowEmailHelp(true)}
+                                onMouseLeave={() => setShowEmailHelp(false)}>
+                                ?
+                            </span>
+                            {showEmailHelp && (
+                                <div className="help-tooltip" style={{ width: "360px", right: "auto", left: 0 }}>
+                                    <strong>Jak wysłać e-maile?</strong><br /><br />
+                                    Aby wysłać certyfikaty, potrzebujesz danych swojego serwera pocztowego (SMTP).<br /><br />
 
+                                    <strong>Skąd wziąć dane SMTP?</strong>
+                                    <ul style={{ margin: "0.5rem 0", paddingLeft: "1.2rem" }}>
+                                        <li><strong>Outlook/Hotmail:</strong> host: <code>smtp.office365.com</code>, port: <code>587</code>.</li>
+                                        <li><strong>nazwa.pl / home.pl:</strong> host znajdziesz w panelu hostingu w sekcji "Poczta".</li>
+                                        <li>
+                                            <strong>Gmail</strong> — wymaga hasła aplikacji (nie zwykłego hasła):
+                                            <ol style={{ margin: "0.4rem 0", paddingLeft: "1.2rem" }}>
+                                                <li>Włącz weryfikację dwuetapową (2FA) na <code>myaccount.google.com</code> → Bezpieczeństwo → Weryfikacja dwuetapowa.</li>
+                                                <li>Wejdź na <code>myaccount.google.com/apppasswords</code>.</li>
+                                                <li>W polu "Nazwa aplikacji" wpisz np. <code>Winietki</code> i kliknij "Utwórz".</li>
+                                                <li>Skopiuj wygenerowane hasło w formacie <code>xxxx xxxx xxxx xxxx</code> — Google pokaże je tylko raz.</li>
+                                                <li>Użyj tych ustawień: host: <code>smtp.gmail.com</code>, port: <code>587</code>, login: Twój adres Gmail, hasło: skopiowane hasło aplikacji, "Połączenie szyfrowane": odznaczone.</li>
+                                            </ol>
+                                        </li>
+                                    </ul>
 
-                            <strong>Skąd wziąć dane SMTP?</strong>
-                            <ul style={{margin: "0.5rem 0", paddingLeft: "1.2rem"}}>
-                                <li><strong>Outlook/Hotmail:</strong> host: <code>smtp.office365.com</code>, port: <code>587</code>.</li>
-                                <li><strong>nazwa.pl / home.pl:</strong> host znajdziesz w panelu hostingu w sekcji "Poczta".</li>
-                                <li>
-                                    <strong>Gmail</strong> — wymaga hasła aplikacji (nie zwykłego hasła):
-                                    <ol style={{margin: "0.4rem 0", paddingLeft: "1.2rem"}}>
-                                        <li>Włącz weryfikację dwuetapową (2FA) na <code>myaccount.google.com</code> → Bezpieczeństwo → Weryfikacja dwuetapowa.</li>
-                                        <li>Wejdź na <code>myaccount.google.com/apppasswords</code>.</li>
-                                        <li>W polu "Nazwa aplikacji" wpisz np. <code>Winietki</code> i kliknij "Utwórz".</li>
-                                        <li>Skopiuj wygenerowane hasło w formacie <code>xxxx xxxx xxxx xxxx</code> — Google pokaże je tylko raz.</li>
-                                        <li>Użyj tych ustawień: host: <code>smtp.gmail.com</code>, port: <code>587</code>, login: Twój adres Gmail, hasło: skopiowane hasło aplikacji, "Połączenie szyfrowane": odznaczone.</li>
-                                    </ol>
-                                </li>
-                            </ul>
-
-
-                            <strong>Tryb testowy (dry-run)</strong> — zaznacz żeby sprawdzić czy wszystko działa <em>bez faktycznego wysyłania</em> maili. Zobaczysz ile wiadomości zostałoby wysłanych.
+                                </div>
+                            )}
                         </div>
 
                         <div className="settings-grid">
@@ -1111,6 +1136,7 @@ function App() {
                                 <label>Login (user)</label>
                                 <input
                                     type="text"
+                                    placeholder="<adres@domena>"
                                     value={smtpUser}
                                     onChange={(e) => setSmtpUser(e.target.value)}
                                     disabled={isSending}
@@ -1129,7 +1155,7 @@ function App() {
                                 <label>From</label>
                                 <input
                                     type="text"
-                                    placeholder="Organizacja <noreply@domena>"
+                                    placeholder="Organizacja <adres@domena>"
                                     value={smtpFrom}
                                     onChange={(e) => setSmtpFrom(e.target.value)}
                                     disabled={isSending}
@@ -1162,7 +1188,7 @@ function App() {
                                     disabled={isSending}
                                 />
                                 <small>
-                                    Placeholdery: {"{fullName}"}, {"{firstName}"}, {"{lastName}"}
+                                    Placeholdery: {"{fullName}"}, {"{title}"}, {"{firstName}"}, {"{lastName}"}
                                 </small>
                             </div>
                             <div className="setting-item">
@@ -1185,14 +1211,9 @@ function App() {
                 {pdfPreviewUrl && (
                     <div className="preview-section">
                         <h2>Podgląd i pozycjonowanie</h2>
-                        <div className="info-box">
-                            Kliknij na podgląd, aby ustawić miejsce podpisu. Tekst
-                            pokazuje pierwszy wiersz z CSV. Pozycja zostanie użyta
-                            zarówno przy generowaniu PDF, jak i wysyłce e-mail.
-                        </div>
-                        <div
-                            className="pdf-preview-container"
-                            ref={previewRef as React.RefObject<HTMLDivElement>}
+                            <div
+                                className="pdf-preview-container"
+                                ref={previewContainerRef}
                             onMouseDown={handleMouseDown}
                             onMouseMove={handleMouseMove}
                             onMouseUp={handleMouseUp}
@@ -1203,7 +1224,7 @@ function App() {
                                 src={pdfPreviewUrl}
                                 className="pdf-preview-img"
                                 alt="PDF Preview"
-                                style={{ width: "100%", height: "auto", display: "block" }}
+                                style={{ width: "100%", height: "auto" }}
                                 draggable="false"
                             />
                             {csvData.length > 0 && (
@@ -1215,9 +1236,13 @@ function App() {
                                         top: namePosition.y,
                                         fontFamily: customFontLoaded
                                             ? customFontFamily
-                                            : "inherit",
+                                            : "'DefaultPDF'", // Poprawka: używamy naszej czcionki z PDF, a nie systemowej
                                         fontSize: `${fontScale}px`,
                                         color: textColor,
+                                        transform:
+                                            textPlacing[0] === "center"
+                                                ? "translate(-50%, 0)"
+                                                : "translate(0, 0)",
                                     }}>
                                     {[
                                         csvData[0].title,

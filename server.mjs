@@ -3,7 +3,7 @@ import cors from "cors";
 import multer from "multer";
 import nodemailer from "nodemailer";
 import Papa from "papaparse";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, cmyk } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { readFile } from "fs/promises";
 
@@ -101,12 +101,7 @@ app.post(
             for (const person of people) {
 
                 if (!person.email) {
-
-                    // Odkomentuj poniższe aby logować pominięte osoby (brak e-mail w CSV)
-
-                    //console.log(`Pominięto: ${person.firstName} ${person.lastName} — brak e-mail`);
-
-
+                    console.log(`Pominięto: ${person.firstName} ${person.lastName} — brak e-mail`);
                     summary.skipped.push({ person, reason: "Brak adresu e-mail" });
 
                     continue;
@@ -209,7 +204,7 @@ async function renderCertificate({
     settings,
     measureFont,
     scaledX,
-    scaledY,
+    scaledY: rawY, // scaledY z mapToPdfCoords traktujemy jako bazę
 }) {
     const doc = await PDFDocument.create();
     doc.registerFontkit(fontkit);
@@ -218,17 +213,25 @@ async function renderCertificate({
 
     const [page] = await doc.copyPages(templateDoc, [0]);
     doc.addPage(page);
+    const { width: pageWidth, height: pageHeight } = page.getSize();
 
     const fullName = buildFullName(person);
-    const currentWidth = measureFont.widthOfTextAtSize(fullName, settings.fontSize);
+    const currentWidth = font.widthOfTextAtSize(fullName, settings.fontSize);
+
+    // Przeliczenie paddingów (4px) + ramki (1px)
+    const paddingPDF_Y = (5 / settings.previewHeight) * pageHeight;
+    const paddingPDF_X = (9 / settings.previewWidth) * pageWidth;
+
+    // Sztywny ułamek 0.87 (idealny środek synchronizujący z przeglądarką)
+    const fontBaselineOffset = settings.fontSize * 0.80;
 
     let setX;
     switch (settings.align) {
         case "left":
-            setX = scaledX;
+            setX = scaledX + paddingPDF_X;
             break;
         case "right":
-            setX = scaledX - currentWidth;
+            setX = scaledX - currentWidth - paddingPDF_X;
             break;
         case "center":
         default:
@@ -236,33 +239,49 @@ async function renderCertificate({
             break;
     }
 
+    // Ostateczne Y z uwzględnieniem paddingu i linii bazowej
+    const setY = rawY - paddingPDF_Y - fontBaselineOffset;
+
     page.drawText(fullName, {
         x: setX,
-        y: scaledY,
+        y: setY,
         size: settings.fontSize,
         font,
-        color: hexToRgb(settings.color),
+        color: hexToCmyk(settings.color),
     });
 
     const pdfBytes = await doc.save();
     return Buffer.from(pdfBytes);
 }
 
-function hexToRgb(hex) {
+function hexToCmyk(hex) {
+    let r = 0, g = 0, b = 0;
     const normalized = hex.startsWith("#") ? hex.slice(1) : hex;
-    if (![3, 6].includes(normalized.length)) {
-        throw new Error("Niepoprawny kolor HEX");
+
+    if (normalized.length === 3) {
+        r = parseInt("0x" + normalized[0] + normalized[0]);
+        g = parseInt("0x" + normalized[1] + normalized[1]);
+        b = parseInt("0x" + normalized[2] + normalized[2]);
+    } else if (normalized.length === 6) {
+        r = parseInt("0x" + normalized[0] + normalized[1]);
+        g = parseInt("0x" + normalized[2] + normalized[3]);
+        b = parseInt("0x" + normalized[4] + normalized[5]);
+    } else {
+        return cmyk(0,0,0,1);
     }
 
-    const expand = (value) =>
-        value.length === 3 ? value.split("").map((c) => c + c).join("") : value;
+    let c = 1 - r / 255;
+    let m = 1 - g / 255;
+    let y = 1 - b / 255;
+    let k = Math.min(c, Math.min(m, y));
 
-    const expanded = expand(normalized);
-    const r = parseInt(expanded.slice(0, 2), 16) / 255;
-    const g = parseInt(expanded.slice(2, 4), 16) / 255;
-    const b = parseInt(expanded.slice(4, 6), 16) / 255;
+    if (k === 1) return cmyk(0, 0, 0, 1);
 
-    return rgb(r, g, b);
+    c = (c - k) / (1 - k);
+    m = (m - k) / (1 - k);
+    y = (y - k) / (1 - k);
+
+    return cmyk(c, m, y, k);
 }
 
 function applyTemplate(template, person) {
