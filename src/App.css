@@ -1,3 +1,10 @@
+@font-face {
+    font-family: 'DefaultPDF';
+    /*noinspection CssUnknownTarget*/
+    src: url('/fonts/default-font.ttf') format('truetype');
+    font-display: block;
+}
+
 :root {
     --primary-color: #5842ff;
     --secondary-color: #f5f5f5;
@@ -19,13 +26,11 @@ body {
     margin: 0 auto;
     padding: 2rem;
     text-align: center;
-    /* background-color: var(--background-color); */
 }
 
 .upload-container {
     display: flex;
     flex-direction: column;
-    /* justify-content: space-between; */
     flex-grow: 1;
 }
 
@@ -40,7 +45,7 @@ body {
     display: grid;
     grid-template-columns: minmax(600px, 1fr) minmax(400px, 1fr);
     gap: 2rem;
-    align-items: stretch;
+    align-items: start;
     min-height: 100%;
 }
 
@@ -69,6 +74,7 @@ body {
     gap: 1.5rem;
     margin-bottom: 2rem;
     height: 100%;
+    align-content: start;
 }
 
 .step-card {
@@ -119,6 +125,7 @@ body {
     display: block;
     width: 24px;
     height: 24px;
+    /*noinspection CssUnknownTarget*/
     background-image: url("/material-symbols_upload-rounded.png");
     background-size: contain;
     background-repeat: no-repeat;
@@ -129,12 +136,6 @@ body {
     display: none;
 }
 
-/* Hide the icon when the span contains text other than "Dodaj" */
-.upload-button
-    span:not(:empty):not(:contains("Dodaj"))
-    + .upload-button::before {
-    display: none;
-}
 
 /* Alternative approach using a class */
 .upload-button.has-file::before {
@@ -183,7 +184,7 @@ input {
     box-shadow: var(--card-shadow);
     position: sticky;
     top: 2rem;
-    height: 100%;
+    height: max-content;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
@@ -216,8 +217,6 @@ input {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 1rem;
-    /* margin-top: 1.5rem; */
-    /* grid-auto-rows: 1fr; */
 }
 
 .setting-item {
@@ -233,7 +232,9 @@ input {
 }
 
 .setting-item select,
-.setting-item input[type="number"] {
+.setting-item input[type="number"],
+.setting-item input[type="text"],
+.setting-item textarea {
     padding: 0.5rem;
     border: 1px solid var(--border-color);
     border-radius: 0.375rem;
@@ -332,16 +333,39 @@ input[type="file"] {
     transition: width 0.3s ease;
 }
 
+.status-box {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: white;
+    text-align: left;
+    color: var(--text-color);
+}
+
+.info-box {
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px dashed var(--border-color);
+    border-radius: 0.5rem;
+    background: #f8fafc;
+    text-align: left;
+    color: var(--text-color);
+    font-size: 0.95rem;
+}
 .name-preview {
     position: absolute;
-    cursor: move;
+    cursor: crosshair;
     user-select: none;
     white-space: nowrap;
     pointer-events: none;
-    border: 1px dashed red;
+    border: 1px solid rgba(255, 0, 0, 0.7);
     border-radius: 0.5rem;
-    background-color: rgba(255, 255, 255, 0.5);
-    padding: 0.5rem;
+    background-color: rgba(255, 255, 255, 0.6);
+    padding: 4px 8px;
+    line-height: 1;
+    box-sizing: border-box;
+    font-family: 'DefaultPDF', sans-serif;
 }
 
 .name-preview.dragging {

@@ -6,6 +6,14 @@ export default defineConfig({
     optimizeDeps: {
         include: ["pdfjs-dist/build/pdf.worker.min.mjs"],
     },
+    server: {
+        proxy: {
+            "/api": {
+                target: "http://localhost:4000",
+                changeOrigin: true,
+            },
+        },
+    },
     build: {
         rollupOptions: {
             output: {
